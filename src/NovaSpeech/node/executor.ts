@@ -1,0 +1,147 @@
+/**
+ * AWS Nova Speech Node Executor
+ * Handles speech generation using AWS Nova Sonic
+ */
+
+import { type NodeExecutionContext } from "@gravityai-dev/plugin-base";
+import { AWSNovaSpeechConfig, AWSNovaSpeechInput, AWSNovaSpeechOutput } from "../util/types";
+import { NovaSpeechService } from "../service";
+import { PromiseNode, createLogger } from "../../shared/platform";
+
+export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
+  constructor() {
+    super("AWSNovaSpeech");
+  }
+
+  /**
+   * Execute the AWS Nova Speech node
+   */
+  protected async executeNode(
+    inputs: AWSNovaSpeechInput,
+    config: AWSNovaSpeechConfig,
+    context: NodeExecutionContext
+  ): Promise<AWSNovaSpeechOutput> {
+    const logger = createLogger("NovaSpeech");
+    try {
+      logger.info("Executing AWS Nova Speech node", {
+        voice: config.voice,
+        temperature: config.temperature,
+        workflowId: context.workflow?.id,
+      });
+
+      // Get workflow metadata for publishing
+      const { chatId, conversationId, userId, providerId } = context.workflow!.variables!;
+
+      // Build metadata for the service
+      const metadata = {
+        workflowId: context.workflow!.id,
+        executionId: context.executionId,
+        chatId,
+        conversationId,
+        userId,
+        providerId: providerId || "AWS Nova Speech",
+      };
+
+      // Build credential context for service
+      const credentialContext = this.buildCredentialContext(context);
+
+      // Use chatId as the sessionId for streaming
+      const streamId = chatId;
+
+      // Log audio input status
+      console.log("Nova Speech config", {
+        hasSystemPrompt: !!config.systemPrompt,
+        hasAudioInput: !!config.audioInput,
+        audioInputLength: config.audioInput ? config.audioInput.length : 0,
+        audioInputPreview: config.audioInput ? config.audioInput.substring(0, 50) : "none",
+        voice: config.voice,
+        temperature: config.temperature,
+        systemPromptPreview: config.systemPrompt ? config.systemPrompt.substring(0, 100) + "..." : "none",
+        systemPromptLength: config.systemPrompt?.length || 0,
+        hasConversationHistory: config.conversationHistory || [],
+        historyCount: config.conversationHistory?.length || 0,
+        hasToolResponse: !!config.toolResponse && Object.keys(config.toolResponse).length > 0,
+        toolResponsePreview: config.toolResponse ? JSON.stringify(config.toolResponse).substring(0, 100) : "none",
+      });
+
+      // Create Nova Speech service instance
+      const service = new NovaSpeechService();
+
+      // Call the service with all configuration
+      const stats = await service.generateSpeechStream(
+        {
+          systemPrompt: config.systemPrompt, // Pass system prompt as-is, don't default to empty string
+          audioInput: config.audioInput,
+          conversationHistory: config.conversationHistory,
+          toolResponse: config.toolResponse && config.toolResponse.length > 0 ? config.toolResponse : undefined,
+          voice: config.voice,
+          redisChannel: config.redisChannel,
+          modelId: "amazon.nova-sonic-v1:0",
+          maxTokens: config.maxTokens || 4096,
+          temperature: config.temperature || 0.7,
+          topP: config.topP || 0.9,
+        },
+        metadata,
+        credentialContext
+      );
+      const textOutput = stats.textOutput;
+      const transcription = stats.transcription;
+      const assistantResponse = stats.assistantResponse;
+
+      logger.info("Speech stream completed", {
+        streamId,
+        workflowId: context.workflow?.id,
+        textOutput: textOutput ? `${textOutput.substring(0, 100)}...` : "No text output",
+        audioOutput: stats.audioOutput ? "Audio generated" : "No audio output",
+        totalTokens: stats.total_tokens,
+      });
+
+      // Return with completion status
+      return {
+        __outputs: {
+          streamId,
+          text: textOutput || "",
+          conversation: {
+            user: transcription || "",
+            assistant: assistantResponse || "",
+          },
+        },
+      };
+    } catch (error: any) {
+      logger.error("Failed to generate speech", {
+        error: error.message,
+        code: error.name,
+        workflowId: context.workflow?.id,
+      });
+
+      // Return error output
+      return {
+        __outputs: {
+          streamId: "",
+          text: "",
+          conversation: {
+            user: "",
+            assistant: "",
+          },
+        },
+      };
+    }
+  }
+  /**
+   * Build credential context from execution context
+   */
+  private buildCredentialContext(context: NodeExecutionContext) {
+    return {
+      credentials: {
+        awsCredential: context.credentials?.awsCredential || {},
+      },
+      nodeType: "AWSNovaSpeech",
+      workflowId: context.workflow?.id || "",
+      executionId: context.executionId || "",
+      nodeId: context.nodeId || "",
+    };
+  }
+}
+
+// Export as default for backward compatibility
+export default NovaSpeechExecutor;
