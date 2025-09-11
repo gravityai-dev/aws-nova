@@ -3,12 +3,6 @@ import { StreamUsageStats, StreamingMetadata, NovaSpeechStreamConfig } from "../
 import { publishAudio } from "../redis/audio";
 import {
   parseOutputEvent,
-  isUsageEvent,
-  isCompletionStartEvent,
-  isContentStartEvent,
-  isContentEndEvent,
-  isAudioOutputEvent,
-  isTextOutputEvent,
   UsageEvent,
   CompletionStartEvent,
   ContentStartOutputEvent,
@@ -205,9 +199,15 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
 
   private handleUsageEvent(event: UsageEvent): void {
     const usageEvent = event.event.usageEvent;
+    
+    // Use speech tokens only
+    const inputSpeechTokens = usageEvent.details?.total?.input?.speechTokens || 0;
+    const outputSpeechTokens = usageEvent.details?.total?.output?.speechTokens || 0;
+    
     this.totalUsage.total_tokens = usageEvent.totalTokens || 0;
+    this.totalUsage.inputTokens = inputSpeechTokens;
+    this.totalUsage.outputTokens = outputSpeechTokens;
     this.totalUsage.estimated = false;
-    // Logging handled in parseUsageEvent
   }
 
   getUsageStats(): StreamUsageStats {

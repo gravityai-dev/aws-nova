@@ -3,10 +3,12 @@
  * Handles speech generation using AWS Nova Sonic
  */
 
-import { type NodeExecutionContext } from "@gravityai-dev/plugin-base";
+import { getPlatformDependencies, type NodeExecutionContext } from "@gravityai-dev/plugin-base";
 import { AWSNovaSpeechConfig, AWSNovaSpeechInput, AWSNovaSpeechOutput } from "../util/types";
 import { NovaSpeechService } from "../service";
-import { PromiseNode, createLogger } from "../../shared/platform";
+
+// Get platform dependencies using Pattern A (correct pattern)
+const { PromiseNode, createLogger, saveTokenUsage } = getPlatformDependencies();
 
 export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
   constructor() {
@@ -95,6 +97,33 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
         audioOutput: stats.audioOutput ? "Audio generated" : "No audio output",
         totalTokens: stats.total_tokens,
       });
+
+      // Save token usage to database if we have usage data
+      if (stats.total_tokens && stats.total_tokens > 0) {
+        // Debug log to check what stats contains
+        console.log("🔍 [NOVA EXECUTOR DEBUG] Stats:", {
+          total_tokens: stats.total_tokens,
+          inputTokens: stats.inputTokens,
+          outputTokens: stats.outputTokens
+        });
+        
+        try {
+          await saveTokenUsage({
+            workflowId: context.workflow?.id || "",
+            executionId: context.executionId,
+            nodeId: context.nodeId,
+            nodeType: "AWSNovaSpeech",
+            model: "amazon.nova-sonic-v1:0",
+            inputTokens: stats.inputTokens || 0,
+            outputTokens: stats.outputTokens || 0,
+            totalTokens: stats.total_tokens,
+            timestamp: new Date(),
+          });
+          logger.info(`Nova Speech token usage saved: ${stats.total_tokens} tokens (input: ${stats.inputTokens || 0}, output: ${stats.outputTokens || 0})`);
+        } catch (error: any) {
+          logger.error("Failed to save Nova Speech token usage", { error: error.message });
+        }
+      }
 
       // Return with completion status
       return {

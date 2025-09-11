@@ -1,6 +1,6 @@
 {
   "name": "@gravityai-dev/aws-nova",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "AWS Nova integration for Gravity workflow system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

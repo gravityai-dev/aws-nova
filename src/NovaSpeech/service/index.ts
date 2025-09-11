@@ -222,6 +222,8 @@ export class NovaSpeechService {
       const result = {
         estimated: usageStats?.estimated || false,
         total_tokens: usageStats?.total_tokens || 0,
+        inputTokens: usageStats?.inputTokens || 0,
+        outputTokens: usageStats?.outputTokens || 0,
         chunk_count: usageStats?.chunk_count || 0,
         sessionId,
         textOutput: session.responseProcessor?.getTextOutput() || "",
@@ -236,12 +238,13 @@ export class NovaSpeechService {
       return {
         estimated: result.estimated || false,
         total_tokens: result.total_tokens || 0,
+        inputTokens: result.inputTokens || 0,
+        outputTokens: result.outputTokens || 0,
         chunk_count: result.chunk_count || 0,
         textOutput: result.textOutput || "",
         audioOutput: result.audioOutput,
-        sessionId: result.sessionId,
-        transcription: result.transcription,
-        assistantResponse: result.assistantResponse,
+        transcription: result.transcription || "",
+        assistantResponse: result.assistantResponse || "",
       };
     } catch (error: any) {
       this.activeLogger.error("Failed to generate speech", {

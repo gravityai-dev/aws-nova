@@ -105,4 +105,6 @@ export interface StreamUsageStats {
   sessionId?: string;
   transcription?: string;
   assistantResponse?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
