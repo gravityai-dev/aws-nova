@@ -50,9 +50,12 @@ export async function publishAudio(config: AudioPublishConfig): Promise<{
     const publisher = getAudioChunkPublisher(
       appConfig.REDIS_HOST,
       appConfig.REDIS_PORT,
-      appConfig.REDIS_PASSWORD,
+      appConfig.REDIS_TOKEN || appConfig.REDIS_PASSWORD,
       providerId,
-      appConfig.REDIS_USERNAME // username from config
+      appConfig.REDIS_TOKEN ? 'default' : appConfig.REDIS_USERNAME,
+      undefined, // db
+      appConfig.REDIS_TOKEN,
+      appConfig.REDIS_TLS ? true : undefined
     );
 
     // Base message
