@@ -4,7 +4,7 @@
  */
 
 import { getAudioChunkPublisher, AI_RESULT_CHANNEL } from "@gravityai-dev/gravity-server";
-import { createLogger, getConfig } from "../../../shared/platform";
+import { createLogger, getConfig, publishAudioChunk } from "../../../shared/platform";
 
 const logger = createLogger("NovaAudio");
 
@@ -22,6 +22,7 @@ export interface AudioPublishConfig {
   providerId: string;
   workflowId: string;
   workflowRunId: string;
+  sessionId?: string;     // Nova Speech session ID
   metadata?: Record<string, any>;
 }
 
@@ -47,16 +48,7 @@ export async function publishAudio(config: AudioPublishConfig): Promise<{
     const appConfig = getConfig();
     const providerId = "gravity-workflow-service";
 
-    const publisher = getAudioChunkPublisher(
-      appConfig.REDIS_HOST,
-      appConfig.REDIS_PORT,
-      appConfig.REDIS_TOKEN || appConfig.REDIS_PASSWORD,
-      providerId,
-      appConfig.REDIS_TOKEN ? 'default' : appConfig.REDIS_USERNAME,
-      undefined, // db
-      appConfig.REDIS_TOKEN,
-      appConfig.REDIS_TLS ? true : undefined
-    );
+    // Use the new unified audio chunk publisher
 
     // Base message
     const baseMessage = {
@@ -67,25 +59,34 @@ export async function publishAudio(config: AudioPublishConfig): Promise<{
     };
 
     // Publish audio chunk
-    await publisher.publishAudioChunk(
-      config.audioData,
-      config.format,
-      config.textReference,
-      config.sourceType,
-      config.duration,
-      config.index,
-      baseMessage,
-      config.redisChannel ? { channel: config.redisChannel } : undefined
-    );
+    await publishAudioChunk({
+      audioData: config.audioData,
+      format: config.format,
+      sourceType: config.sourceType,
+      index: config.index || 0,
+      chatId: config.chatId,
+      conversationId: config.conversationId,
+      userId: config.userId,
+      providerId: config.providerId,
+      sessionId: config.sessionId || undefined,
+      metadata: {
+        textReference: config.textReference,
+        duration: config.duration,
+        workflowId: config.workflowId,
+        workflowRunId: config.workflowRunId,
+      },
+    });
 
-    logger.info("Audio chunk published", {
-      channel: config.redisChannel ?? AI_RESULT_CHANNEL,
+    logger.info("Audio chunk published as GravityEvent", {
+      eventType: "audioChunk",
       workflowId: config.workflowId,
       sourceType: config.sourceType,
+      format: config.format,
+      index: config.index,
     });
 
     return {
-      channel: config.redisChannel ?? AI_RESULT_CHANNEL,
+      channel: "gravity:output",
       success: true,
     };
   } catch (error: any) {
