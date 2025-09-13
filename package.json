@@ -1,6 +1,6 @@
 {
   "name": "@gravityai-dev/aws-nova",
-  "version": "1.1.11",
+  "version": "1.1.12",
   "description": "AWS Nova integration for Gravity workflow system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.0.0",
-    "@gravityai-dev/gravity-server": "file:../../../../gravity-server",
-    "@gravityai-dev/plugin-base": "file:../plugin-base",
+    "@gravityai-dev/gravity-server": "^0.2.108",
+    "@gravityai-dev/plugin-base": "^1.0.15",
     "@smithy/node-http-handler": "^3.0.0",
     "pino": "^8.0.0",
     "rxjs": "^7.0.0"
