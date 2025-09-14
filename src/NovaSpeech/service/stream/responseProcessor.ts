@@ -42,6 +42,13 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
   private config: NovaSpeechStreamConfig;
   public onCompletionEnd?: () => void;
   public onToolUse?: (toolUse: any) => void;
+  
+  // Audio buffering
+  private audioBuffer: string[] = [];
+  private bufferTimer: NodeJS.Timeout | null = null;
+  private readonly BUFFER_DURATION_MS = 300; // Buffer for 300ms
+  private readonly MAX_BUFFER_SIZE = 10; // Max chunks before forced flush
+  private allAudioChunks: string[] = []; // Keep all chunks for final output
 
   constructor(
     metadata: StreamingMetadata,
@@ -109,7 +116,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
         break;
 
       case "completionEnd":
-        this.handleCompletionEnd(jsonResponse as CompletionEndEvent);
+        await this.handleCompletionEnd(parsed as CompletionEndEvent);
         break;
 
       case "usageEvent":
@@ -235,7 +242,8 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
   }
 
   getAudioOutput(): string | undefined {
-    return this.totalUsage.audioOutput;
+    // Return all accumulated audio chunks
+    return this.allAudioChunks.join('');
   }
 
   isComplete(): boolean {
@@ -274,48 +282,74 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
   }
 
   private async handleAudioOutput(event: AudioOutputEvent): Promise<void> {
-    // Check if the event has the audio data in a different structure
-
     const audioOutput = event.event.audioOutput;
     if (audioOutput.content) {
       this.logger.debug("audioOutput received", {
         sessionId: this.sessionId,
         contentId: audioOutput.contentId,
         completionId: audioOutput.completionId,
+        bufferSize: this.audioBuffer.length,
       });
 
-      // Store the audio data
-      this.totalUsage.audioOutput = audioOutput.content;
-      this.totalUsage.chunk_count = (this.totalUsage.chunk_count || 0) + 1;
+      // Add to buffer
+      this.audioBuffer.push(audioOutput.content);
+      
+      // Keep track of all chunks for final output
+      this.allAudioChunks.push(audioOutput.content);
 
-      console.log("✅ Audio output received and stored", {
-        contentLength: audioOutput.content.length,
-        contentId: audioOutput.contentId,
-        completionId: audioOutput.completionId,
-        contentType: typeof audioOutput.content,
-        first50Chars: audioOutput.content.substring(0, 50),
-        //audioOutputKeys: Object.keys(audioOutput),
-        //fullEvent: JSON.stringify(event).substring(0, 200),
-      });
-
-      // Publish to Redis
-      await publishAudio({
-        audioData: audioOutput.content, // Already base64 encoded
-        format: "lpcm",
-        textReference: audioOutput.contentId || "nova-audio-output",
-        sourceType: "NovaSpeech",
-        chatId: this.metadata.chatId,
-        conversationId: this.metadata.conversationId,
-        userId: this.metadata.userId,
-        providerId: this.metadata.providerId || "nova-sonic",
-        workflowId: this.metadata.workflowId,
-        workflowRunId: this.metadata.executionId,
-        redisChannel: this.config.redisChannel,
-        index: this.totalUsage.chunk_count,
-      });
-
-      this.totalUsage.chunk_count = (this.totalUsage.chunk_count || 0) + 1;
+      // Check if we should flush
+      if (this.audioBuffer.length >= this.MAX_BUFFER_SIZE) {
+        // Force flush if buffer is too large
+        await this.flushAudioBuffer();
+      } else if (!this.bufferTimer) {
+        // Start timer for time-based flush
+        this.bufferTimer = setTimeout(() => {
+          this.flushAudioBuffer();
+        }, this.BUFFER_DURATION_MS);
+      }
     }
+  }
+
+  private async flushAudioBuffer(): Promise<void> {
+    if (this.audioBuffer.length === 0) return;
+
+    // Clear timer
+    if (this.bufferTimer) {
+      clearTimeout(this.bufferTimer);
+      this.bufferTimer = null;
+    }
+
+    // Concatenate all buffered chunks
+    const combinedAudio = this.audioBuffer.join('');
+    const chunkCount = this.audioBuffer.length;
+    
+    console.log("🎵 Flushing audio buffer", {
+      chunks: chunkCount,
+      totalLength: combinedAudio.length,
+      avgChunkSize: Math.round(combinedAudio.length / chunkCount),
+    });
+
+    // Publish combined audio
+    await publishAudio({
+      audioData: combinedAudio, // Already base64 encoded
+      format: "lpcm",
+      textReference: `nova-audio-batch-${this.totalUsage.chunk_count}`,
+      sourceType: "NovaSpeech",
+      chatId: this.metadata.chatId,
+      conversationId: this.metadata.conversationId,
+      userId: this.metadata.userId,
+      providerId: this.metadata.providerId || "nova-sonic",
+      workflowId: this.metadata.workflowId,
+      workflowRunId: this.metadata.executionId,
+      redisChannel: this.config.redisChannel,
+      index: this.totalUsage.chunk_count,
+    });
+
+    // Update chunk count
+    this.totalUsage.chunk_count = (this.totalUsage.chunk_count || 0) + 1;
+    
+    // Clear buffer
+    this.audioBuffer = [];
   }
 
   private handleCompletionStart(event: CompletionStartEvent): void {
@@ -328,10 +362,13 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     });
   }
 
-  private handleCompletionEnd(event: CompletionEndEvent): void {
+  private async handleCompletionEnd(event: CompletionEndEvent): Promise<void> {
     const completionEnd = event.event.completionEnd;
     // Logging handled in parseCompletionEndEvent
     this.completionReceived = true;
+
+    // Flush any remaining audio before completion
+    await this.flushAudioBuffer();
 
     // Always trigger completion callback on completionEnd
     if (this.onCompletionEnd) {

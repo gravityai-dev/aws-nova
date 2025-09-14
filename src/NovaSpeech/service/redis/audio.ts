@@ -9,12 +9,12 @@ import { createLogger, getConfig, publishAudioChunk } from "../../../shared/plat
 const logger = createLogger("NovaAudio");
 
 export interface AudioPublishConfig {
-  audioData: string;      // Base64 encoded audio
-  format: string;         // Audio format (mp3, wav, etc)
-  textReference: string;  // Original text
-  sourceType: string;     // "NovaSpeech"
-  duration?: number;      // Duration in seconds
-  index?: number;         // Chunk index for streaming
+  audioData: string; // Base64 encoded audio
+  format: string; // Audio format (mp3, wav, etc)
+  textReference: string; // Original text
+  sourceType: string; // "NovaSpeech"
+  duration?: number; // Duration in seconds
+  index?: number; // Chunk index for streaming
   redisChannel?: string;
   chatId: string;
   conversationId: string;
@@ -22,7 +22,7 @@ export interface AudioPublishConfig {
   providerId: string;
   workflowId: string;
   workflowRunId: string;
-  sessionId?: string;     // Nova Speech session ID
+  sessionId?: string; // Nova Speech session ID
   metadata?: Record<string, any>;
 }
 
@@ -40,9 +40,9 @@ export async function publishAudio(config: AudioPublishConfig): Promise<{
     format: config.format,
     index: config.index,
     hasAudioData: !!config.audioData,
-    audioDataLength: config.audioData?.length || 0
+    audioDataLength: config.audioData?.length || 0,
   });
-  
+
   try {
     // Create publisher - simple and direct
     const appConfig = getConfig();
