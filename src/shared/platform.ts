@@ -95,7 +95,8 @@ export async function publishAudioChunk(config: {
     const redis = deps.getRedisClient();
 
     // Publish to Redis Streams (not Pub/Sub) for reliable delivery
-    const streamKey = "workflow:events:stream";
+    const REDIS_NAMESPACE = process.env.REDIS_NAMESPACE || process.env.NODE_ENV || "local";
+    const streamKey = `${REDIS_NAMESPACE}:workflow:events:stream`;
     const conversationId = config.conversationId || "";
 
     await redis.xadd(
