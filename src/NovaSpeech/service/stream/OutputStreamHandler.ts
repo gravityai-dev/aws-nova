@@ -1,4 +1,4 @@
-import { createLogger } from "../../../shared/platform";
+import { createLogger } from "../redis/publishAudioChunk";
 
 const logger = createLogger("OutputStreamHandler");
 import { NovaSpeechSession } from "./SessionManager";

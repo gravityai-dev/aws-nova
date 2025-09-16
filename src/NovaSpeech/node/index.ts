@@ -11,24 +11,19 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
   const { NodeInputType, AI_RESULT_CHANNEL, SYSTEM_CHANNEL } = getPlatformDependencies();
 
   return {
-    packageVersion: "1.1.16",
+    packageVersion: "1.1.17",
     type: "AWSNovaSpeech",
     isService: false,
     name: "AWS Nova Speech",
     description: "Generate AI-powered voice using AWS Nova Sonic",
     category: "AI",
-    color: "#FF9900", // AWS Orange
+    color: "#FF9900",
     logoUrl: "https://res.cloudinary.com/sonik/image/upload/v1751366180/gravity/icons/awsIcon.png",
     inputs: [
       {
         name: "input",
         type: NodeInputType.ANY,
         description: "Input data",
-      },
-      {
-        name: "audioInput",
-        type: NodeInputType.STRING,
-        description: "Base64 encoded audio input for speech-to-speech",
       },
     ],
     outputs: [
@@ -64,6 +59,12 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
           title: "Tool Response",
           description: "Optional tool response[] to include in the request. Only sent if not empty.",
           default: {},
+          "ui:field": "template",
+        },
+        control: {
+          type: "string",
+          title: "Control Signal",
+          description: "Control signal from upstream node (start, stop, etc).",
           "ui:field": "template",
         },
         audioInput: {

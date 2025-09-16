@@ -125,14 +125,11 @@ export function chunkAudioBuffer(audioBuffer: Buffer, chunkSizeBytes: number = 2
 }
 
 /**
- * Create all events for audio streaming
+ * Create ONLY audioInput events for continuous streaming (no contentStart/End)
+ * Use this for streaming audio chunks after contentStart has been sent
  */
-export function createAudioStreamingEvents(promptName: string, audioData: Buffer | string): any[] {
-  const contentName = randomUUID();
+export function createAudioInputEvents(promptName: string, contentName: string, audioData: Buffer | string): any[] {
   const events = [];
-
-  // Add content start
-  events.push(createAudioContentStart(promptName, contentName));
 
   // Process audio data
   let audioBuffer: Buffer;
@@ -176,13 +173,10 @@ export function createAudioStreamingEvents(promptName: string, audioData: Buffer
     );
   }
 
-  // Add audio input events
+  // Add ONLY audio input events (no contentStart/End)
   for (const chunk of chunks) {
     events.push(createAudioInputEvent(promptName, contentName, chunk));
   }
-
-  // Add content end
-  events.push(createAudioContentEnd(promptName, contentName));
 
   return events;
 }

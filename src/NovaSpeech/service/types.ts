@@ -85,6 +85,7 @@ export interface NovaSpeechConfig extends NovaSpeechStreamConfig {
   // Additional config properties if needed
   conversationHistory?: ConversationHistoryItem[];
   toolResponse?: any[];
+  controlSignal?: string; // Control signal for stream management (START, STOP, etc.)
 }
 
 export interface StreamingMetadata {

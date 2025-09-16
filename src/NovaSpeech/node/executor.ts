@@ -4,7 +4,7 @@
  */
 
 import { getPlatformDependencies, type NodeExecutionContext } from "@gravityai-dev/plugin-base";
-import { AWSNovaSpeechConfig, AWSNovaSpeechInput, AWSNovaSpeechOutput } from "../util/types";
+import { AWSNovaSpeechConfig, AWSNovaSpeechInput, AWSNovaSpeechOutput } from "../../util/types";
 import { NovaSpeechService } from "../service";
 
 // Get platform dependencies using Pattern A (correct pattern)
@@ -34,6 +34,13 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
       // Get workflow metadata for publishing
       const { chatId, conversationId, userId, providerId } = context.workflow!.variables!;
 
+      logger.info("Nova executor input analysis", {
+        hasInput: !!inputs.input,
+        inputMessage: inputs.input?.message?.substring(0, 50),
+        controlSignal: config.control,
+        chatId,
+      });
+
       // Build metadata for the service
       const metadata = {
         workflowId: context.workflow!.id,
@@ -42,6 +49,7 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
         conversationId,
         userId,
         providerId: providerId || "AWS Nova Speech",
+        workflowRunId: context.executionId,
       };
 
       // Build credential context for service
@@ -69,11 +77,11 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
       // Create Nova Speech service instance
       const service = new NovaSpeechService();
 
-      // Call the service with all configuration
+      // Call the service with all configuration including control signal
       const stats = await service.generateSpeechStream(
         {
           systemPrompt: config.systemPrompt, // Pass system prompt as-is, don't default to empty string
-          audioInput: config.audioInput,
+          audioInput: config.audioInput || undefined, // Audio data only
           conversationHistory: config.conversationHistory,
           toolResponse: config.toolResponse && config.toolResponse.length > 0 ? config.toolResponse : undefined,
           voice: config.voice,
@@ -82,6 +90,7 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
           maxTokens: config.maxTokens || 4096,
           temperature: config.temperature || 0.7,
           topP: config.topP || 0.9,
+          controlSignal: config.control, // Pass control signal to service
         },
         metadata,
         credentialContext
@@ -104,9 +113,9 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
         console.log("🔍 [NOVA EXECUTOR DEBUG] Stats:", {
           total_tokens: stats.total_tokens,
           inputTokens: stats.inputTokens,
-          outputTokens: stats.outputTokens
+          outputTokens: stats.outputTokens,
         });
-        
+
         try {
           await saveTokenUsage({
             workflowId: context.workflow?.id || "",
@@ -119,7 +128,11 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
             totalTokens: stats.total_tokens,
             timestamp: new Date(),
           });
-          logger.info(`Nova Speech token usage saved: ${stats.total_tokens} tokens (input: ${stats.inputTokens || 0}, output: ${stats.outputTokens || 0})`);
+          logger.info(
+            `Nova Speech token usage saved: ${stats.total_tokens} tokens (input: ${stats.inputTokens || 0}, output: ${
+              stats.outputTokens || 0
+            })`
+          );
         } catch (error: any) {
           logger.error("Failed to save Nova Speech token usage", { error: error.message });
         }

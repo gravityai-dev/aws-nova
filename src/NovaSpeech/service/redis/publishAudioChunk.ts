@@ -1,7 +1,8 @@
 /**
- * Shared platform dependencies for all Nova services
+ * Audio chunk publishing for Nova services
  */
 import { getPlatformDependencies } from "@gravityai-dev/plugin-base";
+import { v4 as uuid } from "uuid";
 
 // Get platform dependencies once
 const deps = getPlatformDependencies();
@@ -14,12 +15,16 @@ export const getRedisClient = deps.getRedisClient;
 export const PromiseNode = deps.PromiseNode;
 export const CallbackNode = deps.CallbackNode;
 export const NodeExecutionContext = deps.NodeExecutionContext;
+export { getPlatformDependencies };
 
 // Create shared loggers
 export const novaSpeechLogger = createLogger("NovaSpeech");
 
 // Single channel for all events
 export const OUTPUT_CHANNEL = "gravity:output";
+
+// Singleton Redis client for audio publishing to avoid connection pool exhaustion
+let audioRedisClient: any = null;
 
 /**
  * Build a unified GravityEvent structure
@@ -39,16 +44,16 @@ export function buildOutputEvent(config: {
 
   // Build unified message structure
   return {
-    id: Math.random().toString(36).substring(2, 15),
+    id: uuid(),
     timestamp: new Date().toISOString(),
     providerId: config.providerId || "gravity-services",
     chatId: config.chatId,
     conversationId: config.conversationId,
     userId: config.userId,
-    __typename: "GravityEvent",  // Single type for all events
-    type: "GRAVITY_EVENT",       // Single type enum
+    __typename: "GravityEvent", // Single type for all events
+    type: "GRAVITY_EVENT", // Single type enum
     eventType: config.eventType, // Distinguishes between text, progress, card, etc.
-    data: config.data            // Contains the actual event data
+    data: config.data, // Contains the actual event data
   };
 }
 
@@ -71,9 +76,9 @@ export async function publishAudioChunk(config: {
   success: boolean;
 }> {
   const logger = createLogger("AudioChunkPublisher");
-  
+
   try {
-    // Build the event structure
+    // Create GravityEvent for audio chunk
     const event = buildOutputEvent({
       eventType: "audioChunk",
       chatId: config.chatId,
@@ -90,32 +95,15 @@ export async function publishAudioChunk(config: {
       },
     });
 
-    // Get Redis client from platform - call it fresh each time
-    const deps = getPlatformDependencies();
-    const redis = deps.getRedisClient();
+    // Use the universal gravityPublish function from platform API
+    const platformDeps = getPlatformDependencies();
+    await platformDeps.gravityPublish(OUTPUT_CHANNEL, event);
 
-    // Publish to Redis Streams (not Pub/Sub) for reliable delivery
-    const REDIS_NAMESPACE = process.env.REDIS_NAMESPACE || process.env.NODE_ENV || "local";
-    const streamKey = `${REDIS_NAMESPACE}:workflow:events:stream`;
-    const conversationId = config.conversationId || "";
-
-    await redis.xadd(
-      streamKey,
-      "*",
-      "conversationId",
-      conversationId,
-      "channel",
-      OUTPUT_CHANNEL,
-      "message",
-      JSON.stringify(event)
-    );
-
-    logger.info("AudioChunk published as GravityEvent", {
-      eventType: "audioChunk",
+    logger.info("Published audio chunk", {
       channel: OUTPUT_CHANNEL,
+      chatId: config.chatId,
       index: config.index,
-      format: config.format,
-      providerId: config.providerId,
+      audioDataLength: config.audioData?.length || 0,
     });
 
     return {
@@ -125,7 +113,8 @@ export async function publishAudioChunk(config: {
   } catch (error: any) {
     logger.error("Failed to publish audio chunk", {
       error: error.message,
-      providerId: config.providerId,
+      chatId: config.chatId,
+      conversationId: config.conversationId,
     });
     throw error;
   }

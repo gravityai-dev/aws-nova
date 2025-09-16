@@ -154,34 +154,35 @@ export function createPromptStartEvent(
           channelCount: 1,
           voiceId: voiceId as ValidVoiceId,
         },
-        toolUseOutputConfiguration: {
-          mediaType: "application/json",
-        },
-        toolConfiguration: {
-          toolChoice: {
-            tool: { name: "rag_tool" },
-          },
-          tools: [
-            {
-              toolSpec: {
-                name: "rag_tool",
-                description: "Retrieves relevant information from a knowledge base about ADCB banking services.",
-                inputSchema: {
-                  json: JSON.stringify({
-                    type: "object",
-                    properties: {
-                      query: {
-                        type: "string",
-                        description: "The search query to find relevant information about ADCB services",
-                      },
-                    },
-                    required: ["query"],
-                  }),
-                },
-              },
-            },
-          ],
-        },
+        // toolUseOutputConfiguration: {
+        //   mediaType: "application/json",
+        // },
+        // toolConfiguration: {
+        //   // Remove toolChoice to allow Nova to decide when to use tools
+        //   // toolChoice: {
+        //   //   tool: { name: "rag_tool" },
+        //   // },
+        //   tools: [
+        //     {
+        //       toolSpec: {
+        //         name: "rag_tool",
+        //         description: "Retrieves relevant information from a knowledge base about ADCB banking services.",
+        //         inputSchema: {
+        //           json: JSON.stringify({
+        //             type: "object",
+        //             properties: {
+        //               query: {
+        //                 type: "string",
+        //                 description: "The search query to find relevant information about ADCB services",
+        //               },
+        //             },
+        //             required: ["query"],
+        //           }),
+        //         },
+        //       },
+        //     },
+        //   ],
+        // },
       },
     },
   };

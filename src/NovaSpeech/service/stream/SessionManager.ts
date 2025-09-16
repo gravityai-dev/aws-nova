@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { NovaSpeechResponseProcessor } from "./responseProcessor";
 import { EventQueue } from "./EventQueue";
-import { createLogger } from "../../../shared/platform";
+import { createLogger } from "../redis/publishAudioChunk";
 
 const logger = createLogger("SessionManager");
 import { NovaSpeechStreamConfig, StreamingMetadata } from "../types";
@@ -26,7 +26,8 @@ export class SessionManager {
   private sessions = new Map<string, NovaSpeechSession>();
 
   createSession(streamConfig: NovaSpeechStreamConfig, metadata: StreamingMetadata): NovaSpeechSession {
-    const sessionId = randomUUID();
+    // Use workflowId as sessionId for easier matching between client and Nova
+    const sessionId = metadata.workflowId || randomUUID();
     const promptId = randomUUID();
 
     const session: NovaSpeechSession = {
