@@ -33,6 +33,9 @@ export class AwsErrorHandler {
       totalRetryDelay: error.$metadata?.totalRetryDelay,
       stack: error.stack,
     };
+    
+    // CRITICAL: Send cleanup events for any error
+    await this.sendErrorCleanupEvents(session);
 
     // Handle specific AWS Bedrock exceptions
     switch (error.name) {
@@ -145,6 +148,60 @@ export class AwsErrorHandler {
       if (session.responseProcessor?.onCompletionEnd) {
         session.responseProcessor.onCompletionEnd();
       }
+    }
+  }
+  
+  /**
+   * Send cleanup events when any error occurs
+   * Following AWS Nova best practices: promptEnd, contentEnd, sessionEnd
+   */
+  private static async sendErrorCleanupEvents(session: NovaSpeechSession): Promise<void> {
+    try {
+      const eventQueue = session.eventQueue;
+      if (!eventQueue) return;
+      
+      logger.info("Sending error cleanup events", { sessionId: session.sessionId });
+      
+      // Get chatId from responseProcessor's metadata
+      const chatId = (session.responseProcessor as any)?.metadata?.chatId || session.sessionId;
+      
+      // 1. Send contentEnd if audio was streaming
+      if (session.audioContentStartSent) {
+        await (eventQueue as any).add({
+          event: {
+            contentEnd: {
+              promptName: chatId,
+              contentName: `${chatId}_error_cleanup`,
+            },
+          },
+        });
+      }
+      
+      // 2. Send promptEnd
+      await (eventQueue as any).add({
+        event: {
+          promptEnd: {
+            promptName: chatId,
+          },
+        },
+      });
+      
+      // 3. Send sessionEnd
+      await (eventQueue as any).add({
+        event: {
+          sessionEnd: {},
+        },
+      });
+      
+      // Close the event queue
+      eventQueue.close();
+      
+      logger.info("Error cleanup events sent successfully", { sessionId: session.sessionId });
+    } catch (cleanupError: any) {
+      logger.error("Failed to send error cleanup events", {
+        sessionId: session.sessionId,
+        error: cleanupError.message,
+      });
     }
   }
 }

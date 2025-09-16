@@ -1,21 +1,22 @@
-import { NovaSpeechConfig, StreamUsageStats as NovaSpeechStats } from "../types";
+import { NovaSpeechConfig, StreamUsageStats as NovaSpeechStats, StreamingMetadata } from "../types";
 import { EventQueue } from "../stream/EventQueue";
-import { SessionManager } from "../stream/SessionManager";
+import { SessionManager, NovaSpeechSession } from "../stream/SessionManager";
 import { StreamHandler } from "../stream/StreamHandler";
-import { EventMetadataProcessor } from "../events/EventMetadataProcessor";
+import { SimpleAudioSubscriber } from "../redis/SimpleAudioSubscriber";
+import { publishAudioStatus } from "../redis/publishAudioStatus";
 import { AwsErrorHandler } from "../errors/AwsErrorHandler";
+import { StatusPublisher } from "../status/StatusPublisher";
 import { createStartEvents } from "../events/in/1_startEvents";
 import { createSystemPromptEvents } from "../events/in/2_systemPromptEvents";
 import { createConversationHistoryEvents, HistoryMessage } from "../events/in/3_historyEvents";
 import { createAudioInputEvents } from "../events/in/4_audioStreamingEvents";
 import { createToolStreamingEvents } from "../events/in";
 import { EventMetadata } from "../events/eventHelpers";
+import { EventMetadataProcessor } from "../events/EventMetadataProcessor";
 import { delay } from "../stream/utils/timing";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { NodeHttp2Handler } from "@smithy/node-http-handler";
-import { createLogger } from "../redis/publishAudioChunk";
-import { getNodeCredentials } from "../redis/publishAudioChunk";
-import { SimpleAudioSubscriber } from "../redis/SimpleAudioSubscriber";
+import { createLogger, getNodeCredentials } from "../redis/publishAudioChunk";
 
 export class SessionOrchestrator {
   private readonly modelId = "amazon.nova-sonic-v1:0";
@@ -223,6 +224,10 @@ export class SessionOrchestrator {
     });
 
     if (config.controlSignal === "START_CALL") {
+      // Send error cleanup events at startup to establish clean session state
+      // This ensures Nova starts fresh even if previous session had errors
+      await this.sendStartupCleanupEvents(session, promptName);
+      
       // Create audio subscriber for this session
       const audioSubscriber = new SimpleAudioSubscriber(
         eventMetadata.chatId || "",
@@ -357,5 +362,55 @@ export class SessionOrchestrator {
       transcription: usageStats?.transcription || "",
       assistantResponse: usageStats?.assistantResponse || "",
     };
+  }
+
+  /**
+   * Send cleanup events at startup to establish clean session state
+   * This ensures Nova starts fresh even if previous session had errors
+   */
+  private async sendStartupCleanupEvents(session: NovaSpeechSession, promptName: string): Promise<void> {
+    try {
+      const eventQueue = session.eventQueue;
+      if (!eventQueue) return;
+
+      this.logger.info("Sending startup cleanup events", { sessionId: session.sessionId });
+
+      // Send the full cleanup sequence: contentEnd, promptEnd, sessionEnd
+      // This ensures Nova is in a clean state regardless of previous errors
+      
+      // 1. Send contentEnd (in case previous audio was interrupted)
+      await (eventQueue as any).add({
+        event: {
+          contentEnd: {
+            promptName: promptName,
+            contentName: `${promptName}_startup_cleanup`,
+          },
+        },
+      });
+
+      // 2. Send promptEnd
+      await (eventQueue as any).add({
+        event: {
+          promptEnd: {
+            promptName: promptName,
+          },
+        },
+      });
+
+      // 3. Send sessionEnd to fully reset
+      await (eventQueue as any).add({
+        event: {
+          sessionEnd: {},
+        },
+      });
+
+      this.logger.info("Startup cleanup events sent successfully", { sessionId: session.sessionId });
+    } catch (error) {
+      this.logger.warn("Failed to send startup cleanup events", { 
+        sessionId: session.sessionId, 
+        error 
+      });
+      // Continue anyway - don't fail the session start
+    }
   }
 }
