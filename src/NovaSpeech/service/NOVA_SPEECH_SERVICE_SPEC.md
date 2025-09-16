@@ -127,22 +127,40 @@ Numbered for execution order:
 - **AwsErrorHandler.ts**: AWS-specific error handling
   - Timeout detection
   - Graceful degradation
+  - **NEW**: Automatic cleanup event sequence on errors (contentEnd, promptEnd, sessionEnd)
+  - **NEW**: Startup cleanup events on START_CALL to ensure clean session state
 
 #### Status Publishing (`/status`)
 - **StatusPublisher.ts**: Audio session status events
   - AUDIO_SESSION_READY
   - AUDIO_SESSION_ENDED
-  - Error states
-
-#### Client Management (`/client`)
-- **BedrockClientFactory.ts**: Creates Bedrock clients
-  - HTTP/2 configuration
-  - Credential management
 
 ### 7. Type Definitions (`/types.ts`)
 - **NovaSpeechConfig**: Service configuration
 - **StreamUsageStats**: Usage metrics
 - **Event interfaces**: All event type definitions
+
+## Key Learnings & Best Practices
+
+### Audio Feedback Prevention
+- **Issue**: Nova's audio output can be captured by microphone causing echo/feedback loops
+- **Solution**: Immediate microphone muting when first audio chunk arrives from Nova
+- **Implementation**: DirectStreamingAudioPlayer notifies on audio receipt, not just playback
+
+### Session State Management
+- **Issue**: Nova can get stuck in bad state from previous errors
+- **Solution**: Send full cleanup sequence (contentEnd, promptEnd, sessionEnd) at START_CALL
+- **AWS Recommendation**: Always send these events when errors occur
+
+### Audio Streaming Reliability
+- **Issue**: Small audio chunks (2.5KB) cause jumpy playback
+- **Solution**: Buffer on both server (10KB) and client (3+ chunks) sides
+- **Result**: Smoother audio playback with fewer gaps
+
+### Event Publishing
+- **Issue**: Direct Redis operations can fail or hang
+- **Solution**: Use platform's gravityPublish function consistently
+- **Pattern**: Fire-and-forget with error logging
 
 ## Key Design Patterns
 
@@ -170,6 +188,7 @@ Numbered for execution order:
 
 ### 5. Control Signals
 - START_CALL: Initialize streaming session
+  - **NEW**: Sends cleanup events (contentEnd, promptEnd, sessionEnd) at startup to ensure clean state
 - END_CALL: Clean shutdown
 - Passed via config.control from workflow
 
@@ -177,14 +196,17 @@ Numbered for execution order:
 - Each audio chunk automatically wrapped with contentStart/contentEnd
 - Unique contentName generated per chunk
 - No explicit segment control signals needed
+- **NEW**: Server-side audio buffering (10KB chunks) to reduce client playback jumpiness
+- **NEW**: Client-side buffering (3+ chunks) for smoother playback
 
 ## Audio Streaming Flow
 
 ### Call Initialization
 1. Client sends START_CALL → Workflow → Nova
-2. Nova registers with AudioStreamSubscriber
-3. Nova publishes AUDIO_SESSION_READY
-4. Client begins streaming audio
+2. **NEW**: Nova sends cleanup events (contentEnd, promptEnd, sessionEnd) to ensure clean state
+3. Nova registers with AudioStreamSubscriber
+4. Nova publishes AUDIO_SESSION_READY
+5. Client begins streaming audio
 
 ### Audio Processing
 1. Client sends audio chunks → Redis Stream
