@@ -28,16 +28,19 @@ export interface StreamResponseProcessor {
 export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
   private completionReceived = false;
   private readonly sessionId: string;
-  private readonly logger: Logger;
   private metadata: StreamingMetadata;
-  private config: NovaSpeechStreamConfig;
-  public onCompletionEnd?: () => void;
-  public onToolUse?: (toolUse: any) => void;
-
-  // Extracted components
-  private eventParser: EventParser;
+  private logger: any;
   private textAccumulator: TextAccumulator;
   private usageStatsCollector: UsageStatsCollector;
+  private audioBuffer: string[] = [];
+  private audioBufferSize: number = 0;
+  private audioBufferTimeout: NodeJS.Timeout | null = null;
+  private readonly AUDIO_BUFFER_TARGET_SIZE = 10240; // 4x larger chunks (10KB)
+  private readonly AUDIO_BUFFER_MAX_DELAY = 100; // 100ms max delay
+  private config: NovaSpeechStreamConfig;
+  private eventParser: EventParser;
+  private onToolUse?: (toolUse: any) => void;
+  onCompletionEnd?: () => void;
 
   constructor(
     metadata: StreamingMetadata,
@@ -200,42 +203,76 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
   private async handleAudioOutput(event: AudioOutputEvent): Promise<void> {
     const audioOutput = event.event.audioOutput;
     if (audioOutput.content) {
-      // Log to verify no double publishing
-      //console.log(`[ResponseProcessor] Publishing audio chunk, size: ${audioOutput.content.length}`);
+      // Add to buffer instead of publishing immediately
+      this.audioBuffer.push(audioOutput.content);
+      this.audioBufferSize += audioOutput.content.length;
 
-      try {
-        // Don't await - let it publish in background
-        publishAudioChunk({
-          audioData: audioOutput.content,
-          format: "lpcm",
-          sourceType: "NovaSpeech",
-          index: 0, // Not used by client
-          chatId: this.metadata.chatId,
-          conversationId: this.metadata.conversationId,
-          userId: this.metadata.userId,
-          providerId: this.metadata.providerId || "nova-sonic",
-          sessionId: this.sessionId,
-          metadata: {
-            textReference: `nova-audio`,
-            workflowId: this.metadata.workflowId,
-            workflowRunId: this.metadata.executionId,
-            contentId: audioOutput.contentId,
-            completionId: audioOutput.completionId,
-          },
-        }).catch((error) => {
-          this.logger.error("Failed to publish audio chunk", {
-            error: error.message,
-            chatId: this.metadata.chatId,
-          });
-        });
-      } catch (error: any) {
-        this.logger.error("Failed to publish audio chunk directly", {
-          error: error.message,
-          chatId: this.metadata.chatId,
-        });
+      // Clear existing timeout
+      if (this.audioBufferTimeout) {
+        clearTimeout(this.audioBufferTimeout);
       }
 
-      // No longer tracking audio - it's published directly
+      // Check if we should flush
+      if (this.audioBufferSize >= this.AUDIO_BUFFER_TARGET_SIZE) {
+        // Buffer is full, flush immediately
+        await this.flushAudioBuffer();
+      } else {
+        // Set timeout to flush if no more chunks arrive
+        this.audioBufferTimeout = setTimeout(() => {
+          this.flushAudioBuffer();
+        }, this.AUDIO_BUFFER_MAX_DELAY);
+      }
+    }
+  }
+
+  private async flushAudioBuffer(): Promise<void> {
+    if (this.audioBuffer.length === 0) return;
+
+    // Clear timeout
+    if (this.audioBufferTimeout) {
+      clearTimeout(this.audioBufferTimeout);
+      this.audioBufferTimeout = null;
+    }
+
+    // Combine all buffered chunks
+    const combinedAudio = this.audioBuffer.join('');
+    const totalSize = this.audioBufferSize;
+
+    // Clear buffer
+    this.audioBuffer = [];
+    this.audioBufferSize = 0;
+
+    try {
+      // Publish the combined chunk
+      publishAudioChunk({
+        audioData: combinedAudio,
+        format: "lpcm",
+        sourceType: "NovaSpeech",
+        index: 0,
+        chatId: this.metadata.chatId,
+        conversationId: this.metadata.conversationId,
+        userId: this.metadata.userId,
+        providerId: this.metadata.providerId || "nova-sonic",
+        sessionId: this.sessionId,
+        metadata: {
+          textReference: `nova-audio`,
+          workflowId: this.metadata.workflowId,
+          workflowRunId: this.metadata.executionId,
+          chunkCount: this.audioBuffer.length,
+          totalSize: totalSize,
+        },
+      }).catch((error) => {
+        this.logger.error("Failed to publish buffered audio chunk", {
+          error: error.message,
+          chatId: this.metadata.chatId,
+          bufferSize: totalSize,
+        });
+      });
+    } catch (error: any) {
+      this.logger.error("Failed to flush audio buffer", {
+        error: error.message,
+        chatId: this.metadata.chatId,
+      });
     }
   }
 

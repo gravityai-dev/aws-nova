@@ -41,7 +41,7 @@ export class AudioSubscriberManager {
     promptName: string
   ): Promise<SimpleAudioSubscriber> {
     const key = this.getKey(chatId, nodeId, workflowId);
-    
+
     // Check if subscriber already exists
     const existing = this.subscribers.get(key);
     if (existing) {
@@ -50,7 +50,7 @@ export class AudioSubscriberManager {
         nodeId: `${nodeId}-${workflowId}`,
         key,
         totalSubscribers: this.subscribers.size,
-        allKeys: Array.from(this.subscribers.keys())
+        allKeys: Array.from(this.subscribers.keys()),
       });
       // Stop the old subscriber
       await existing.stop();
@@ -61,17 +61,10 @@ export class AudioSubscriberManager {
     logger.info("🆕 Creating new audio subscriber", {
       chatId,
       nodeId: `${nodeId}-${workflowId}`,
-      key
+      key,
     });
 
-    const subscriber = new SimpleAudioSubscriber(
-      chatId,
-      nodeId,
-      workflowId,
-      eventQueue,
-      eventMetadata,
-      promptName
-    );
+    const subscriber = new SimpleAudioSubscriber(chatId, nodeId, workflowId, eventQueue, eventMetadata, promptName);
 
     await subscriber.start();
     this.subscribers.set(key, subscriber);
@@ -86,10 +79,10 @@ export class AudioSubscriberManager {
     const key = this.getKey(chatId, nodeId, workflowId);
     const subscriber = this.subscribers.get(key);
     if (subscriber) {
-      logger.info("🗑️ Removing audio subscriber", { 
+      logger.info("🗑️ Removing audio subscriber", {
         chatId,
         nodeId: `${nodeId}-${workflowId}`,
-        key 
+        key,
       });
       await subscriber.stop();
       this.subscribers.delete(key);
@@ -101,7 +94,7 @@ export class AudioSubscriberManager {
    */
   async stopAll(): Promise<void> {
     logger.info("🛑 Stopping all audio subscribers", {
-      count: this.subscribers.size
+      count: this.subscribers.size,
     });
 
     for (const [chatId, subscriber] of this.subscribers) {

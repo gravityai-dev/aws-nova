@@ -97,7 +97,11 @@ export async function publishAudioChunk(config: {
 
     // Use the universal gravityPublish function from platform API
     const platformDeps = getPlatformDependencies();
-    await platformDeps.gravityPublish(OUTPUT_CHANNEL, event);
+
+    // Fire and forget - don't await to avoid hanging
+    platformDeps.gravityPublish(OUTPUT_CHANNEL, event).catch((error) => {
+      console.error(`[AudioChunkPublisher] gravityPublish failed:`, error);
+    });
 
     return {
       channel: OUTPUT_CHANNEL,

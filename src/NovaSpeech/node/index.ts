@@ -11,7 +11,7 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
   const { NodeInputType, AI_RESULT_CHANNEL, SYSTEM_CHANNEL } = getPlatformDependencies();
 
   return {
-    packageVersion: "1.1.18",
+    packageVersion: "1.1.19",
     type: "AWSNovaSpeech",
     isService: false,
     name: "AWS Nova Speech",
