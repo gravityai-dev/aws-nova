@@ -99,13 +99,6 @@ export async function publishAudioChunk(config: {
     const platformDeps = getPlatformDependencies();
     await platformDeps.gravityPublish(OUTPUT_CHANNEL, event);
 
-    logger.info("Published audio chunk", {
-      channel: OUTPUT_CHANNEL,
-      chatId: config.chatId,
-      index: config.index,
-      audioDataLength: config.audioData?.length || 0,
-    });
-
     return {
       channel: OUTPUT_CHANNEL,
       success: true,

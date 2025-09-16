@@ -54,7 +54,16 @@ export class OutputStreamHandler {
           try {
             const jsonResponse = JSON.parse(textResponse);
             const eventType = jsonResponse.event ? Object.keys(jsonResponse.event)[0] : "unknown";
-            console.log(`\n🟢 RECEIVED EVENT #${responseEventCount} - Type: ${eventType}`);
+
+            // Only log non-audioOutput events to reduce noise
+            if (eventType !== "audioOutput") {
+              console.log(`\n🟢 RECEIVED EVENT #${responseEventCount} - Type: ${eventType}`);
+            } else {
+              // For audioOutput, update the same line
+              process.stdout.write(
+                `\r🟢 RECEIVED EVENT #${responseEventCount} - Type: ${eventType}                    `
+              );
+            }
 
             // Log full event details for debugging (skip for now - handled in parseOutputEvent)
 
@@ -80,14 +89,44 @@ export class OutputStreamHandler {
             sessionId: session.sessionId,
             error: event.modelStreamErrorException,
           });
-          throw new Error(`Model stream error: ${JSON.stringify(event.modelStreamErrorException)}`);
+
+          // Handle gracefully - synthesize completion and continue
+          console.log("\n⚠️ Nova encountered an error - ending session gracefully");
+          const syntheticCompletionEnd = {
+            event: {
+              completionEnd: {
+                promptName: session.sessionId,
+                completionId: `error-${Date.now()}`,
+                stopReason: "END_TURN" as const,
+              },
+            },
+          };
+          await session.responseProcessor.processEvent(syntheticCompletionEnd);
+
+          // Don't throw - let the session end gracefully
+          break;
         } else if (event.internalServerException) {
           console.error(`\n❌ INTERNAL SERVER ERROR:`, event.internalServerException);
           logger.error("Internal server error from Nova", {
             sessionId: session.sessionId,
             error: event.internalServerException,
           });
-          throw new Error(`Internal server error: ${JSON.stringify(event.internalServerException)}`);
+
+          // Handle gracefully - synthesize completion and continue
+          console.log("\n⚠️ Nova internal error - ending session gracefully");
+          const syntheticCompletionEnd = {
+            event: {
+              completionEnd: {
+                promptName: session.sessionId,
+                completionId: `internal-error-${Date.now()}`,
+                stopReason: "END_TURN" as const,
+              },
+            },
+          };
+          await session.responseProcessor.processEvent(syntheticCompletionEnd);
+
+          // Don't throw - let the session end gracefully
+          break;
         }
       }
 
@@ -103,6 +142,61 @@ export class OutputStreamHandler {
       console.error("Error message:", error.message);
       console.error("Error stack:", error.stack);
       console.error("Events processed before error:", responseEventCount);
+
+      // Handle Nova timeout gracefully - this happens when there's a long period of silence
+      if (error.name === "ValidationException" && error.message === "Timed out waiting for input events") {
+        console.log("\n⏱️ Nova timed out due to silence - gracefully ending session");
+        logger.info("Nova timeout - ending session gracefully", {
+          sessionId: session.sessionId,
+          eventsProcessed: responseEventCount,
+        });
+
+        // Synthesize a completion event to properly close the session
+        const syntheticCompletionEnd = {
+          event: {
+            completionEnd: {
+              promptName: session.sessionId,
+              completionId: `timeout-${Date.now()}`,
+              stopReason: "END_TURN" as const, // Use valid stop reason
+            },
+          },
+        };
+
+        // Process the synthetic completion to update stats
+        await session.responseProcessor.processEvent(syntheticCompletionEnd);
+
+        // Don't throw - let the session end gracefully
+        return;
+      }
+
+      // Handle HTTP/2 stream reset errors gracefully
+      if (error.name === "ValidationException" && error.message.includes("RST_STREAM")) {
+        console.log("\n🔄 HTTP/2 stream reset - ending session gracefully");
+        logger.info("HTTP/2 stream reset - ending session gracefully", {
+          sessionId: session.sessionId,
+          eventsProcessed: responseEventCount,
+          errorMessage: error.message,
+        });
+
+        // Synthesize a completion event to properly close the session
+        const syntheticCompletionEnd = {
+          event: {
+            completionEnd: {
+              promptName: session.sessionId,
+              completionId: `stream-reset-${Date.now()}`,
+              stopReason: "END_TURN" as const,
+            },
+          },
+        };
+
+        // Process the synthetic completion to update stats
+        await session.responseProcessor.processEvent(syntheticCompletionEnd);
+
+        // Don't throw - let the session end gracefully
+        return;
+      }
+
+      // For other errors, still throw
       throw error;
     }
   }

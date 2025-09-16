@@ -8,8 +8,6 @@ import { createStartEvents } from "../events/in/1_startEvents";
 import { createSystemPromptEvents } from "../events/in/2_systemPromptEvents";
 import { createConversationHistoryEvents, HistoryMessage } from "../events/in/3_historyEvents";
 import { createAudioInputEvents } from "../events/in/4_audioStreamingEvents";
-import { createPromptEndEvent } from "../events/in/5_promptEndEvent";
-import { createSessionEndEvent } from "../events/in/6_sessionEndEvent";
 import { createToolStreamingEvents } from "../events/in";
 import { EventMetadata } from "../events/eventHelpers";
 import { delay } from "../stream/utils/timing";
@@ -17,7 +15,7 @@ import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { NodeHttp2Handler } from "@smithy/node-http-handler";
 import { createLogger } from "../redis/publishAudioChunk";
 import { getNodeCredentials } from "../redis/publishAudioChunk";
-import { audioStreamSubscriber } from "../redis/AudioStreamSubscriber";
+import { SimpleAudioSubscriber } from "../redis/SimpleAudioSubscriber";
 
 export class SessionOrchestrator {
   private readonly modelId = "amazon.nova-sonic-v1:0";
@@ -76,7 +74,7 @@ export class SessionOrchestrator {
         // Don't close the queue - let the session continue
         return;
       }
-      
+
       this.logger.error("Stream error:", error);
       session.eventQueue?.close();
     });
@@ -225,27 +223,21 @@ export class SessionOrchestrator {
     });
 
     if (config.controlSignal === "START_CALL") {
-      // Unregister any existing session for this workflow first
-      const existingSessions = audioStreamSubscriber.getActiveSessions();
-      for (const [existingChatId, existingSession] of existingSessions) {
-        if (existingSession.workflowId === (metadata.workflowId || sessionId)) {
-          audioStreamSubscriber.unregisterSession(existingChatId);
-          this.logger.info("🔄 Unregistered previous session for workflow", {
-            oldChatId: existingChatId,
-            workflowId: metadata.workflowId || sessionId,
-          });
-        }
-      }
-
-      // Register session for Redis audio streaming
-      audioStreamSubscriber.registerSession(eventMetadata.chatId || "", {
-        sessionId,
-        eventQueue: session.eventQueue,
+      // Create audio subscriber for this session
+      const audioSubscriber = new SimpleAudioSubscriber(
+        eventMetadata.chatId || "",
+        context.nodeId || "cantIDnode",
+        metadata.workflowId || sessionId,
+        session.eventQueue,
         eventMetadata,
-        promptName,
-        nodeId: context.nodeId || "cantIDnode",
-        workflowId: metadata.workflowId || sessionId,
-      });
+        promptName
+      );
+      
+      // Start listening for audio
+      await audioSubscriber.start();
+      
+      // Store subscriber on session for cleanup
+      (session as any).audioSubscriber = audioSubscriber;
 
       // Publish session ready status with nodeId for audio routing
       const { publishAudioStatus } = await import("../redis/publishAudioStatus");
@@ -272,8 +264,12 @@ export class SessionOrchestrator {
     } else if (config.controlSignal === "END_CALL") {
       this.logger.info("🛑 Ending audio call and cleaning up session", { sessionId });
 
-      // Unregister session from Redis audio streaming
-      audioStreamSubscriber.unregisterSession(eventMetadata.chatId || "");
+      // Stop audio subscriber if it exists
+      const audioSubscriber = (session as any).audioSubscriber;
+      if (audioSubscriber) {
+        await audioSubscriber.stop();
+        delete (session as any).audioSubscriber;
+      }
 
       // Publish session ended status
       const { publishAudioStatus } = await import("../redis/publishAudioStatus");
@@ -335,8 +331,10 @@ export class SessionOrchestrator {
         return;
       }
       completionHandled = true;
-      this.logger.info("🔄 Completion received - keeping session open for continued conversation", { sessionId: session.sessionId });
-      
+      this.logger.info("🔄 Completion received - keeping session open for continued conversation", {
+        sessionId: session.sessionId,
+      });
+
       // Don't close the session - let it continue until END_CALL or timeout
       // The session will be closed by handleControlSignal when END_CALL is received
     };

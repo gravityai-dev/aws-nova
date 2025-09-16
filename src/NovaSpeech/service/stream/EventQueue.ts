@@ -12,14 +12,6 @@ export class EventQueue {
   constructor(private sessionId: string) {}
 
   enqueue(event: any): void {
-    // Log audio events to verify they're being queued
-    if (event?.event?.audioInput) {
-      console.log(" [EventQueue] Enqueueing audio event:", {
-        promptName: event.event.audioInput.promptName,
-        contentName: event.event.audioInput.contentName,
-        audioLength: event.event.audioInput.content?.length || 0,
-      });
-    }
     if (!this.isActive) {
       throw new Error("Cannot enqueue events after queue is closed");
     }

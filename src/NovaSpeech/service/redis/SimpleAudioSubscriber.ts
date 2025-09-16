@@ -1,0 +1,181 @@
+/**
+ * Simple audio subscriber for Nova Speech
+ * Direct pub/sub connection without session management
+ */
+
+import { createLogger } from "../redis/publishAudioChunk";
+import {
+  createAudioContentStart,
+  createAudioInputEvents,
+  createAudioContentEnd,
+} from "../events/in/4_audioStreamingEvents";
+import { EventMetadata } from "../events/eventHelpers";
+
+const logger = createLogger("SimpleAudioSubscriber");
+
+export interface AudioStreamMessage {
+  chatId: string;
+  nodeId: string; // nodeId-workflowId composite
+  workflowId: string;
+  audioInput: string; // Base64 encoded audio
+  timestamp: number;
+  action?: string; // Optional control action
+}
+
+export class SimpleAudioSubscriber {
+  private subscriberClient: any = null;
+  private audioChannel: string;
+  private chatId: string;
+  private nodeId: string;
+  private workflowId: string;
+  private eventQueue: any;
+  private eventMetadata: EventMetadata;
+  private promptName: string;
+
+  constructor(
+    chatId: string,
+    nodeId: string,
+    workflowId: string,
+    eventQueue: any,
+    eventMetadata: EventMetadata,
+    promptName: string
+  ) {
+    const REDIS_NAMESPACE = process.env.REDIS_NAMESPACE || process.env.NODE_ENV || "local";
+    this.audioChannel = `${REDIS_NAMESPACE}:audio:input:channel`;
+    this.chatId = chatId;
+    this.nodeId = nodeId;
+    this.workflowId = workflowId;
+    this.eventQueue = eventQueue;
+    this.eventMetadata = eventMetadata;
+    this.promptName = promptName;
+  }
+
+  /**
+   * Start listening for audio
+   */
+  async start(): Promise<void> {
+    try {
+      const { getPlatformDependencies } = require("@gravityai-dev/plugin-base");
+      const deps = getPlatformDependencies();
+      const baseClient = deps.getRedisClient();
+
+      if (!baseClient) {
+        throw new Error("Redis client not available from platform");
+      }
+
+      // Duplicate for pub/sub
+      this.subscriberClient = baseClient.duplicate();
+
+      // Set up message handler
+      this.subscriberClient.on("message", async (channel: string, message: string) => {
+        if (channel === this.audioChannel) {
+          await this.handleAudioMessage(message);
+        }
+      });
+
+      // Subscribe to audio channel
+      await this.subscriberClient.subscribe(this.audioChannel);
+
+      logger.info("🎵 Started audio subscription", {
+        channel: this.audioChannel,
+        chatId: this.chatId,
+        nodeId: `${this.nodeId}-${this.workflowId}`,
+        timestamp: Date.now(),
+        instanceId: Math.random().toString(36).substring(7),
+      });
+    } catch (error: any) {
+      logger.error("Failed to start audio subscription", { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Stop listening for audio
+   */
+  async stop(): Promise<void> {
+    if (!this.subscriberClient) {
+      return;
+    }
+
+    logger.info("🛑 Stopping audio subscription", {
+      chatId: this.chatId,
+    });
+
+    try {
+      await this.subscriberClient.unsubscribe(this.audioChannel);
+      this.subscriberClient.disconnect();
+      this.subscriberClient = null;
+    } catch (error: any) {
+      logger.error("Failed to stop audio subscription", { error: error.message });
+    }
+  }
+
+  /**
+   * Handle incoming audio message
+   */
+  private async handleAudioMessage(message: string): Promise<void> {
+    try {
+      const audioMessage: AudioStreamMessage = JSON.parse(message);
+
+      // Check if this message is for us
+      const expectedNodeId = `${this.nodeId}-${this.workflowId}`;
+      if (audioMessage.chatId !== this.chatId || audioMessage.nodeId !== expectedNodeId) {
+        return; // Not for this instance
+      }
+
+      // Process audio
+      await this.feedAudioToNova(audioMessage);
+    } catch (error: any) {
+      logger.error("Failed to handle audio message", {
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Feed audio to Nova session
+   */
+  private async feedAudioToNova(audioMessage: AudioStreamMessage): Promise<void> {
+    try {
+      logger.info("🎤 Processing audio segment", {
+        chatId: audioMessage.chatId,
+        audioLength: audioMessage.audioInput?.length || 0,
+        timestamp: audioMessage.timestamp,
+        nodeId: audioMessage.nodeId,
+        ourNodeId: `${this.nodeId}-${this.workflowId}`,
+        eventQueueActive: this.eventQueue?.active,
+        eventQueueLength: this.eventQueue?.length,
+      });
+
+      // Generate unique content name for this audio segment
+      const contentName = `${audioMessage.chatId}_${audioMessage.timestamp}`;
+
+      // Create Nova events for this audio chunk
+      const contentStartEvent = createAudioContentStart(this.promptName, contentName);
+      await this.eventQueue.enqueue(contentStartEvent, this.eventMetadata, this.promptName);
+
+      // Create audio input events from the base64 audio
+      const audioEvents = createAudioInputEvents(this.promptName, contentName, audioMessage.audioInput);
+
+      // Enqueue all audio events
+      for (const event of audioEvents) {
+        await this.eventQueue.enqueue(event, this.eventMetadata, this.promptName);
+      }
+
+      // Send content end
+      const contentEndEvent = createAudioContentEnd(this.promptName, contentName);
+      await this.eventQueue.enqueue(contentEndEvent, this.eventMetadata, this.promptName);
+
+      logger.info("✅ Audio segment sent to Nova", {
+        chatId: audioMessage.chatId,
+        contentName: contentName,
+        eventCount: audioEvents.length + 2, // +2 for start and end events
+      });
+    } catch (error: any) {
+      logger.error("Failed to feed audio to Nova", {
+        chatId: audioMessage.chatId,
+        error: error.message,
+      });
+    }
+  }
+}

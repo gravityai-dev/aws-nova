@@ -152,11 +152,10 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
 
     // No longer needed - audio is published directly
 
-    // Don't end the conversation on END_TURN - keep it open for continued interaction
-    if (contentEnd.stopReason === "END_TURN") {
-      console.log("🔄 END_TURN detected - conversation continues");
-      // Don't synthesize completionEnd - let the conversation continue
-    }
+    // Keep the conversation open for ALL stop reasons - don't close the call
+    const stopReason = contentEnd.stopReason;
+    console.log(`🔄 ${stopReason} detected - conversation continues, call remains open`);
+    // Don't synthesize completionEnd - let the conversation continue
   }
 
   // Usage events are now handled by UsageStatsCollector
@@ -202,7 +201,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     const audioOutput = event.event.audioOutput;
     if (audioOutput.content) {
       // Log to verify no double publishing
-      console.log(`[ResponseProcessor] Publishing audio chunk, size: ${audioOutput.content.length}`);
+      //console.log(`[ResponseProcessor] Publishing audio chunk, size: ${audioOutput.content.length}`);
 
       try {
         // Don't await - let it publish in background
@@ -260,11 +259,9 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     this.usageStatsCollector.setTextOutput(textResults.fullTextOutput);
     this.usageStatsCollector.setAudioOutput(""); // No longer accumulating audio
 
-    // Always trigger completion callback on completionEnd
-    if (this.onCompletionEnd) {
-      console.log("🏁 CompletionEnd received - triggering completion callback");
-      this.onCompletionEnd();
-    }
+    // DO NOT trigger completion callback - this is just Nova finishing its response, not the call ending
+    console.log("🏁 CompletionEnd received - Nova finished responding, but call remains open");
+    // The call should only end when we receive an END_CALL control signal
   }
 
   private handleToolUse(event: any): void {
