@@ -9,13 +9,11 @@ export interface AWSNovaSpeechConfig {
   maxTokens?: number;
   systemPrompt?: string;
   streamResponse?: boolean;
-  audioInput?: string;
   conversationHistory?: Array<{
     role: "user" | "assistant";
     content: string;
   }>;
   toolResponse?: any[];
-  control?: string;
   redisChannel?: string;
   topP?: number;
 }

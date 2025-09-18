@@ -3,9 +3,8 @@ import { EventQueue } from "../stream/EventQueue";
 import { SessionManager, NovaSpeechSession } from "../stream/SessionManager";
 import { StreamHandler } from "../stream/StreamHandler";
 import { SimpleAudioSubscriber } from "../redis/SimpleAudioSubscriber";
-import { publishAudioStatus } from "../redis/publishAudioStatus";
+import { publishAudioChunk, AudioState } from "../redis/publishAudioChunk";
 import { AwsErrorHandler } from "../errors/AwsErrorHandler";
-import { StatusPublisher } from "../status/StatusPublisher";
 import { createStartEvents } from "../events/in/1_startEvents";
 import { createSystemPromptEvents } from "../events/in/2_systemPromptEvents";
 import { createConversationHistoryEvents, HistoryMessage } from "../events/in/3_historyEvents";
@@ -59,9 +58,9 @@ export class SessionOrchestrator {
 
     // Build inference configuration
     const inferenceConfig = {
-      maxTokens: 4096,
-      temperature: config.temperature || 0.7,
-      topP: config.topP || 0.9,
+      maxTokens: config.maxTokens || 4096,
+      temperature: config.temperature || 0.2,
+      topP: config.topP || 0.2,
     };
 
     // Start streaming
@@ -137,7 +136,7 @@ export class SessionOrchestrator {
     const http2Handler = new NodeHttp2Handler({
       requestTimeout: 300000,
       sessionTimeout: 300000,
-      disableConcurrentStreams: true,
+      disableConcurrentStreams: false,
       maxConcurrentStreams: 5,
     });
 
@@ -159,7 +158,15 @@ export class SessionOrchestrator {
     eventQueue: EventQueue
   ): Promise<void> {
     // Send start events
-    const startEvents = createStartEvents(promptName, inferenceConfig, config.voice || "tiffany", true);
+    const voiceToUse = config.voice || "tiffany";
+    this.logger.info("🎯 [VOICE DEBUG] SessionOrchestrator creating start events", {
+      configVoice: config.voice,
+      voiceToUse,
+      temperature: inferenceConfig.temperature,
+      maxTokens: inferenceConfig.maxTokens,
+      promptName,
+    });
+    const startEvents = createStartEvents(promptName, inferenceConfig, voiceToUse, true);
     EventMetadataProcessor.processEventBatch(startEvents, eventMetadata, eventQueue);
 
     // Send system prompt events
@@ -224,10 +231,6 @@ export class SessionOrchestrator {
     });
 
     if (config.controlSignal === "START_CALL") {
-      // Send error cleanup events at startup to establish clean session state
-      // This ensures Nova starts fresh even if previous session had errors
-      await this.sendStartupCleanupEvents(session, promptName);
-      
       // Create audio subscriber for this session
       const audioSubscriber = new SimpleAudioSubscriber(
         eventMetadata.chatId || "",
@@ -237,27 +240,35 @@ export class SessionOrchestrator {
         eventMetadata,
         promptName
       );
-      
+
       // Start listening for audio
       await audioSubscriber.start();
-      
+
       // Store subscriber on session for cleanup
       (session as any).audioSubscriber = audioSubscriber;
 
       // Publish session ready status with nodeId for audio routing
-      const { publishAudioStatus } = await import("../redis/publishAudioStatus");
-      publishAudioStatus({
-        state: "AUDIO_SESSION_READY",
+      publishAudioChunk({
+        audioData: "", // Empty for state-only
+        format: "lpcm",
+        sourceType: "NovaSpeech",
+        index: 0,
         chatId: eventMetadata.chatId || "",
         conversationId: eventMetadata.conversationId || "",
         userId: eventMetadata.userId || "",
-        providerId: "nova-service",
-        workflowId: metadata.workflowId || sessionId,
-        workflowRunId: metadata.workflowRunId || "",
+        providerId: "nova-speech",
+        sessionId,
         metadata: {
-          nodeId: context.nodeId || "cantIDnode", // Nova instance ID from execution context
-          workflowId: metadata.workflowId || sessionId,
+          audioState: "AUDIO_SESSION_READY",
+          workflowId: metadata.workflowId,
+          workflowRunId: metadata.executionId,
+          nodeId: context.nodeId || "cantIDnode",
+          timestamp: new Date().toISOString(),
+          queueSize: 0, // Initial queue size
+          maxQueueSize: 50, // Let client know the limit
         },
+      }).catch((error) => {
+        this.logger.error("Failed to publish AUDIO_SESSION_READY", { error });
       });
 
       this.logger.info("📡 Registered session for audio streaming and published AUDIO_SESSION_READY", {
@@ -277,15 +288,24 @@ export class SessionOrchestrator {
       }
 
       // Publish session ended status
-      const { publishAudioStatus } = await import("../redis/publishAudioStatus");
-      publishAudioStatus({
-        state: "AUDIO_SESSION_ENDED",
+      publishAudioChunk({
+        audioData: "", // Empty for state-only
+        format: "lpcm",
+        sourceType: "NovaSpeech",
+        index: 0,
         chatId: eventMetadata.chatId || "",
         conversationId: eventMetadata.conversationId || "",
         userId: eventMetadata.userId || "",
         providerId: "nova-service",
-        workflowId: metadata.workflowId || sessionId,
-        workflowRunId: metadata.workflowRunId || "",
+        sessionId,
+        metadata: {
+          audioState: "AUDIO_SESSION_ENDED",
+          workflowId: metadata.workflowId || sessionId,
+          workflowRunId: metadata.workflowRunId || "",
+          timestamp: new Date().toISOString(),
+        },
+      }).catch((error) => {
+        this.logger.error("Failed to publish AUDIO_SESSION_ENDED", { error });
       });
     }
   }
@@ -362,55 +382,5 @@ export class SessionOrchestrator {
       transcription: usageStats?.transcription || "",
       assistantResponse: usageStats?.assistantResponse || "",
     };
-  }
-
-  /**
-   * Send cleanup events at startup to establish clean session state
-   * This ensures Nova starts fresh even if previous session had errors
-   */
-  private async sendStartupCleanupEvents(session: NovaSpeechSession, promptName: string): Promise<void> {
-    try {
-      const eventQueue = session.eventQueue;
-      if (!eventQueue) return;
-
-      this.logger.info("Sending startup cleanup events", { sessionId: session.sessionId });
-
-      // Send the full cleanup sequence: contentEnd, promptEnd, sessionEnd
-      // This ensures Nova is in a clean state regardless of previous errors
-      
-      // 1. Send contentEnd (in case previous audio was interrupted)
-      await (eventQueue as any).add({
-        event: {
-          contentEnd: {
-            promptName: promptName,
-            contentName: `${promptName}_startup_cleanup`,
-          },
-        },
-      });
-
-      // 2. Send promptEnd
-      await (eventQueue as any).add({
-        event: {
-          promptEnd: {
-            promptName: promptName,
-          },
-        },
-      });
-
-      // 3. Send sessionEnd to fully reset
-      await (eventQueue as any).add({
-        event: {
-          sessionEnd: {},
-        },
-      });
-
-      this.logger.info("Startup cleanup events sent successfully", { sessionId: session.sessionId });
-    } catch (error) {
-      this.logger.warn("Failed to send startup cleanup events", { 
-        sessionId: session.sessionId, 
-        error 
-      });
-      // Continue anyway - don't fail the session start
-    }
   }
 }

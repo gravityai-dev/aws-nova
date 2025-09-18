@@ -11,7 +11,7 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
   const { NodeInputType, AI_RESULT_CHANNEL, SYSTEM_CHANNEL } = getPlatformDependencies();
 
   return {
-    packageVersion: "1.1.22",
+    packageVersion: "1.1.23",
     type: "AWSNovaSpeech",
     isService: false,
     name: "AWS Nova Speech",
@@ -59,18 +59,6 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
           title: "Tool Response",
           description: "Optional tool response[] to include in the request. Only sent if not empty.",
           default: {},
-          "ui:field": "template",
-        },
-        control: {
-          type: "string",
-          title: "Control Signal",
-          description: "Control signal from upstream node (start, stop, etc).",
-          "ui:field": "template",
-        },
-        audioInput: {
-          type: "string",
-          title: "Audio Input",
-          description: "Base64 encoded audio input.",
           "ui:field": "template",
         },
         conversationHistory: {
@@ -130,7 +118,7 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
         },
       },
       required: ["voice", "redisChannel"],
-      "ui:order": ["systemPrompt", "audioInput", "conversationHistory", "voice", "temperature", "redisChannel"],
+      "ui:order": ["systemPrompt", "conversationHistory", "voice", "temperature", "redisChannel"],
     },
     // Declare capabilities
     capabilities: {

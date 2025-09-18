@@ -37,7 +37,7 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
       logger.info("Nova executor input analysis", {
         hasInput: !!inputs.input,
         inputMessage: inputs.input?.message?.substring(0, 50),
-        controlSignal: config.control,
+        controlSignal: "START_CALL", // Always start call when node executes
         chatId,
       });
 
@@ -58,20 +58,16 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
       // Use chatId as the sessionId for streaming
       const streamId = chatId;
 
-      // Log audio input status
-      console.log("Nova Speech config", {
-        hasSystemPrompt: !!config.systemPrompt,
-        hasAudioInput: !!config.audioInput,
-        audioInputLength: config.audioInput ? config.audioInput.length : 0,
-        audioInputPreview: config.audioInput ? config.audioInput.substring(0, 50) : "none",
+      // Log configuration status with VOICE DEBUGGING
+      console.log("🎯 [VOICE DEBUG] Nova Speech executor received config:", {
         voice: config.voice,
+        voiceType: typeof config.voice,
         temperature: config.temperature,
+        temperatureType: typeof config.temperature,
+        hasSystemPrompt: !!config.systemPrompt,
         systemPromptPreview: config.systemPrompt ? config.systemPrompt.substring(0, 100) + "..." : "none",
-        systemPromptLength: config.systemPrompt?.length || 0,
         hasConversationHistory: config.conversationHistory || [],
         historyCount: config.conversationHistory?.length || 0,
-        hasToolResponse: !!config.toolResponse && Object.keys(config.toolResponse).length > 0,
-        toolResponsePreview: config.toolResponse ? JSON.stringify(config.toolResponse).substring(0, 100) : "none",
       });
 
       // Create Nova Speech service instance
@@ -81,7 +77,7 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
       const stats = await service.generateSpeechStream(
         {
           systemPrompt: config.systemPrompt, // Pass system prompt as-is, don't default to empty string
-          audioInput: config.audioInput || undefined, // Audio data only
+          // Audio input now comes via Redis streaming, not config
           conversationHistory: config.conversationHistory,
           toolResponse: config.toolResponse && config.toolResponse.length > 0 ? config.toolResponse : undefined,
           voice: config.voice,
@@ -90,7 +86,7 @@ export class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
           maxTokens: config.maxTokens || 4096,
           temperature: config.temperature || 0.7,
           topP: config.topP || 0.9,
-          controlSignal: config.control, // Pass control signal to service
+          controlSignal: "START_CALL", // Always start call when node executes
         },
         metadata,
         credentialContext

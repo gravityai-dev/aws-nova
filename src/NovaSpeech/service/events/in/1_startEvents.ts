@@ -138,6 +138,8 @@ export function createPromptStartEvent(
     throw new Error(`Invalid voiceId: ${voiceId}. Must be one of: ${validVoices.join(", ")}`);
   }
 
+  console.log("🎯 [VOICE DEBUG] createPromptStartEvent creating event with voiceId:", voiceId);
+
   const promptStartEvent: any = {
     event: {
       promptStart: {
@@ -199,6 +201,14 @@ export function createStartEvents(
   voiceId: string = "matthew",
   enableTextOutput: boolean = true
 ): any[] {
+  console.log("🎯 [VOICE DEBUG] createStartEvents called with:", {
+    promptName,
+    voiceId,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    enableTextOutput,
+  });
+  
   return [
     createSessionStartEvent(config.temperature, config.maxTokens, config.topP),
     createPromptStartEvent(promptName, voiceId, enableTextOutput),

@@ -31,6 +31,7 @@ export class SimpleAudioSubscriber {
   private eventQueue: any;
   private eventMetadata: EventMetadata;
   private promptName: string;
+  private isAudioSegmentActive: boolean = false;
 
   constructor(
     chatId: string,
@@ -123,6 +124,21 @@ export class SimpleAudioSubscriber {
         return; // Not for this instance
       }
 
+      // Handle control actions
+      if (audioMessage.action) {
+        await this.handleControlAction(audioMessage.action);
+        return; // Control messages don't contain audio
+      }
+
+      // Only process audio if we're in an active segment
+      if (!this.isAudioSegmentActive) {
+        logger.debug("Ignoring audio - no active segment", {
+          chatId: this.chatId,
+          timestamp: audioMessage.timestamp,
+        });
+        return;
+      }
+
       // Process audio
       await this.feedAudioToNova(audioMessage);
     } catch (error: any) {
@@ -133,19 +149,45 @@ export class SimpleAudioSubscriber {
   }
 
   /**
+   * Handle control actions (START_AUDIO_SEGMENT, END_AUDIO_SEGMENT)
+   */
+  private async handleControlAction(action: string): Promise<void> {
+    logger.info("🎛️ Received control action", {
+      action,
+      chatId: this.chatId,
+      previousState: this.isAudioSegmentActive,
+    });
+
+    switch (action) {
+      case "START_AUDIO_SEGMENT":
+        this.isAudioSegmentActive = true;
+        logger.info("🎤 Audio segment started - accepting audio", {
+          chatId: this.chatId,
+        });
+        break;
+
+      case "END_AUDIO_SEGMENT":
+        this.isAudioSegmentActive = false;
+        logger.info("🔇 Audio segment ended - ignoring audio", {
+          chatId: this.chatId,
+        });
+        break;
+
+      default:
+        logger.warn("Unknown control action", {
+          action,
+          chatId: this.chatId,
+        });
+    }
+  }
+
+  /**
    * Feed audio to Nova session
    */
   private async feedAudioToNova(audioMessage: AudioStreamMessage): Promise<void> {
     try {
-      logger.info("🎤 Processing audio segment", {
-        chatId: audioMessage.chatId,
-        audioLength: audioMessage.audioInput?.length || 0,
-        timestamp: audioMessage.timestamp,
-        nodeId: audioMessage.nodeId,
-        ourNodeId: `${this.nodeId}-${this.workflowId}`,
-        eventQueueActive: this.eventQueue?.active,
-        eventQueueLength: this.eventQueue?.length,
-      });
+      // With segment control, queue should never build up
+      // Audio only arrives during active speech segments
 
       // Generate unique content name for this audio segment
       const contentName = `${audioMessage.chatId}_${audioMessage.timestamp}`;
@@ -155,22 +197,24 @@ export class SimpleAudioSubscriber {
       await this.eventQueue.enqueue(contentStartEvent, this.eventMetadata, this.promptName);
 
       // Create audio input events from the base64 audio
+      console.log(
+        `🎯 About to call createAudioInputEvents with: promptName=${this.promptName}, contentName=${contentName}, audioLength=${audioMessage.audioInput?.length}`
+      );
       const audioEvents = createAudioInputEvents(this.promptName, contentName, audioMessage.audioInput);
+      console.log(`📦 createAudioInputEvents returned ${audioEvents.length} events`);
 
-      // Enqueue all audio events
-      for (const event of audioEvents) {
-        await this.eventQueue.enqueue(event, this.eventMetadata, this.promptName);
+      // Just pipe through - let Nova handle backpressure
+
+      // Enqueue all audio events immediately - no delays!
+      // The chunking already happened in createAudioInputEvents (8KB chunks)
+      // Send all chunks immediately to Nova
+      for (let i = 0; i < audioEvents.length; i++) {
+        await this.eventQueue.enqueue(audioEvents[i], this.eventMetadata, this.promptName);
       }
 
       // Send content end
       const contentEndEvent = createAudioContentEnd(this.promptName, contentName);
       await this.eventQueue.enqueue(contentEndEvent, this.eventMetadata, this.promptName);
-
-      logger.info("✅ Audio segment sent to Nova", {
-        chatId: audioMessage.chatId,
-        contentName: contentName,
-        eventCount: audioEvents.length + 2, // +2 for start and end events
-      });
     } catch (error: any) {
       logger.error("Failed to feed audio to Nova", {
         chatId: audioMessage.chatId,

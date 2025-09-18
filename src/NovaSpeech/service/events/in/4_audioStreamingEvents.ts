@@ -88,7 +88,7 @@ export function createAudioInputEvent(promptName: string, contentName: string, a
       },
     },
   };
-  console.log("🎯 AUDIO INPUT EVENT:", JSON.stringify(logEvent, null, 2));
+  //console.log("🎯 AUDIO INPUT EVENT:", JSON.stringify(logEvent, null, 2));
 
   return event;
 }
@@ -112,10 +112,10 @@ export function createAudioContentEnd(promptName: string, contentName: string): 
 /**
  * Helper to chunk audio buffer into larger chunks for better streaming
  */
-export function chunkAudioBuffer(audioBuffer: Buffer, chunkSizeBytes: number = 24576): string[] {
+export function chunkAudioBuffer(audioBuffer: Buffer, chunkSizeBytes: number = 8192): string[] {
   const chunks: string[] = [];
 
-  // Use 24KB chunks (matching AWS sample code)
+  // Use 8KB chunks for better Nova processing (smaller chunks prevent interruption issues)
   for (let i = 0; i < audioBuffer.length; i += chunkSizeBytes) {
     const chunk = audioBuffer.slice(i, Math.min(i + chunkSizeBytes, audioBuffer.length));
     chunks.push(chunk.toString("base64"));
@@ -129,6 +129,7 @@ export function chunkAudioBuffer(audioBuffer: Buffer, chunkSizeBytes: number = 2
  * Use this for streaming audio chunks after contentStart has been sent
  */
 export function createAudioInputEvents(promptName: string, contentName: string, audioData: Buffer | string): any[] {
+  console.log(`🔥 createAudioInputEvents CALLED: promptName=${promptName}, contentName=${contentName}, audioData type=${typeof audioData}, length=${audioData?.length || 0}`);
   const events = [];
 
   // Process audio data
@@ -158,9 +159,13 @@ export function createAudioInputEvents(promptName: string, contentName: string, 
     throw new Error("audioData must be a Buffer or base64 string");
   }
 
-  // Chunk audio into 24KB pieces (matching AWS sample code)
-  // This reduces the number of events sent to Nova
-  const chunks = chunkAudioBuffer(audioBuffer, 24576);
+  // Chunk audio into 32ms frames (~1KB at 16kHz) for continuous streaming
+  // This matches Nova's expected audioInput frame pattern
+  // 32ms at 16kHz = 512 samples = 1024 bytes (16-bit)
+  const frameSize = 1024; // 32ms frames
+  const chunks = chunkAudioBuffer(audioBuffer, frameSize);
+
+  console.log(`📦 Creating ${chunks.length} audio frames of ~32ms each (${frameSize} bytes per frame)`);
 
   // Verify total chunk size matches original
   const totalChunkBytes = chunks.reduce((sum, chunk) => {
@@ -174,6 +179,7 @@ export function createAudioInputEvents(promptName: string, contentName: string, 
   }
 
   // Add ONLY audio input events (no contentStart/End)
+  // Send as continuous 32ms frames like the diagram shows
   for (const chunk of chunks) {
     events.push(createAudioInputEvent(promptName, contentName, chunk));
   }

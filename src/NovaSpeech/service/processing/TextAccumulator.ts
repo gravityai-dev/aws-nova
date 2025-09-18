@@ -35,6 +35,11 @@ export class TextAccumulator {
     // regardless of generationStage (SPECULATIVE or FINAL)
     if (role === "ASSISTANT") {
       this.isAssistantFinalResponse = true;
+      // Clear any previous assistant response to prevent mixing interrupted responses
+      this.assistantResponse = "";
+    } else if (role === "USER") {
+      // Clear any previous transcription when starting new user input
+      this.transcription = "";
     }
   }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { NovaSpeechResponseProcessor } from "./responseProcessor";
+import { NovaSpeechResponseProcessor } from "./processors/ResponseProcessor";
 import { EventQueue } from "./EventQueue";
 import { createLogger } from "../redis/publishAudioChunk";
 

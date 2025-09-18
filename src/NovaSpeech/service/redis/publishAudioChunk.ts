@@ -57,6 +57,26 @@ export function buildOutputEvent(config: {
   };
 }
 
+
+// Define audio state types - aligned with publishAudioStatus states
+export type AudioState = 
+  // Session states
+  | "AUDIO_SESSION_STARTING"  // Audio session is starting
+  | "AUDIO_SESSION_READY"     // Audio session is ready
+  | "AUDIO_SESSION_ENDED"     // Audio session has ended
+  | "AUDIO_ERROR"             // Audio error occurred
+  // Nova speech states
+  | "NOVA_SPEECH_STARTED"     // Nova begins speaking
+  | "NOVA_SPEECH_STREAMING"   // Nova is streaming audio chunks
+  | "NOVA_SPEECH_ENDED"       // Nova finished speaking
+  // User speech states
+  | "USER_SPEECH_STARTED"     // User begins speaking
+  | "USER_SPEECH_STREAMING"   // User is streaming audio
+  | "USER_SPEECH_ENDED"       // User finished speaking
+  // Special states
+  | "AUDIO_SIGNAL"            // Special audio signal/control
+  | "SILENCE";                // Silence/no audio
+
 /**
  * Publish an audio chunk event
  */
@@ -70,7 +90,10 @@ export async function publishAudioChunk(config: {
   userId: string;
   providerId: string;
   sessionId?: string;
-  metadata?: Record<string, any>;
+  metadata: {
+    audioState: AudioState;  // Mandatory audio state in metadata
+    [key: string]: any;     // Allow additional metadata
+  };
 }): Promise<{
   channel: string;
   success: boolean;
@@ -91,7 +114,10 @@ export async function publishAudioChunk(config: {
         sourceType: config.sourceType,
         index: config.index,
         sessionId: config.sessionId,
-        metadata: config.metadata,
+        metadata: {
+          ...config.metadata,
+          timestamp: new Date().toISOString(),
+        },
       },
     });
 

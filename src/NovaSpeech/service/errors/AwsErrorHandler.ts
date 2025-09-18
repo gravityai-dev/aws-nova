@@ -165,9 +165,13 @@ export class AwsErrorHandler {
       // Get chatId from responseProcessor's metadata
       const chatId = (session.responseProcessor as any)?.metadata?.chatId || session.sessionId;
       
-      // 1. Send contentEnd if audio was streaming
+      // Import standard AWS event functions
+      const { createPromptEndEvent } = await import('../events/in/5_promptEndEvent');
+      const { createSessionEndEvent } = await import('../events/in/6_sessionEndEvent');
+      
+      // 1. Send contentEnd if audio was streaming (AWS recommendation)
       if (session.audioContentStartSent) {
-        await (eventQueue as any).add({
+        eventQueue.enqueue({
           event: {
             contentEnd: {
               promptName: chatId,
@@ -177,21 +181,13 @@ export class AwsErrorHandler {
         });
       }
       
-      // 2. Send promptEnd
-      await (eventQueue as any).add({
-        event: {
-          promptEnd: {
-            promptName: chatId,
-          },
-        },
-      });
+      // 2. Send promptEnd (AWS requirement)
+      const promptEndEvent = createPromptEndEvent(chatId);
+      eventQueue.enqueue(promptEndEvent);
       
-      // 3. Send sessionEnd
-      await (eventQueue as any).add({
-        event: {
-          sessionEnd: {},
-        },
-      });
+      // 3. Send sessionEnd (AWS requirement)
+      const sessionEndEvent = createSessionEndEvent();
+      eventQueue.enqueue(sessionEndEvent);
       
       // Close the event queue
       eventQueue.close();

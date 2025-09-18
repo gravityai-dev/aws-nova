@@ -14,6 +14,9 @@
 - 🎭 **Multiple Voices** - 11 different voices with accent support
 - 📊 **Usage Analytics** - Token counting and performance metrics
 - 🔄 **Redis Integration** - Real-time audio publishing to Redis streams
+- 🔇 **Audio Feedback Prevention** - Automatic microphone muting during playback
+- 🛡️ **Error Recovery** - Automatic cleanup events for robust session management
+- 🎵 **Smooth Playback** - Server and client-side audio buffering
 
 ## Quick Start
 
@@ -153,6 +156,8 @@ The package includes comprehensive error handling:
 - **ModelStreamErrorException** - Nova model errors  
 - **Timeout Protection** - Automatic recovery from timeouts
 - **Centralized Logging** - Detailed error reporting
+- **Session Recovery** - Automatic cleanup events (contentEnd, promptEnd, sessionEnd) on errors
+- **Startup Cleanup** - Sends cleanup sequence on START_CALL to ensure clean state
 
 ## Advanced Usage
 
@@ -197,6 +202,28 @@ interface NovaSpeechStats {
   audioOutput?: string;        // Base64 MP3 audio
 }
 ```
+
+## Recent Improvements
+
+### Audio Feedback Prevention
+- Microphone automatically mutes when Nova starts speaking
+- Prevents echo loops where Nova hears its own output
+- DirectStreamingAudioPlayer notifies immediately on first audio chunk
+
+### Session State Management  
+- Sends full cleanup sequence on START_CALL to ensure clean state
+- Prevents Nova from getting stuck in bad state from previous errors
+- Follows AWS best practices for error recovery
+
+### Audio Streaming Reliability
+- Server buffers small 2.5KB chunks into 10KB chunks
+- Client waits for 3+ chunks before processing
+- Results in smoother playback without gaps
+
+### Publishing Pattern
+- Uses platform's gravityPublish function consistently
+- Fire-and-forget pattern with error logging
+- Avoids hanging on Redis operations
 
 ## Contributing
 

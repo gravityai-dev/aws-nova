@@ -9,9 +9,9 @@ import { SessionOrchestrator } from "./orchestration/SessionOrchestrator";
 import { SessionConfigBuilder } from "./config/SessionConfigBuilder";
 import { createLogger } from "./redis/publishAudioChunk";
 import { AwsErrorHandler } from "./errors/AwsErrorHandler";
+import { NovaSessionManager } from "./NovaSessionManager";
 
 export class NovaSpeechService {
-  private readonly orchestrator = new SessionOrchestrator();
   private readonly logger = createLogger("NovaSpeechService");
 
   /**
@@ -23,12 +23,29 @@ export class NovaSpeechService {
       // Validate configuration
       SessionConfigBuilder.validateConfig(config);
 
+      // Extract required identifiers
+      const workflowId = metadata.workflowId || context.workflowId || "unknown-workflow";
+      const nodeId = context.nodeId || "unknown-node";
+      const chatId = metadata.chatId || "unknown-chat";
+
       // Log session context
       const loggingContext = SessionConfigBuilder.buildLoggingContext("pending", metadata, config);
-      this.logger.info("🚀 Starting Nova Speech session", loggingContext);
+      this.logger.info("🚀 Nova Speech request via Session Manager", {
+        ...loggingContext,
+        workflowId,
+        nodeId,
+        chatId
+      });
 
-      // Delegate to orchestrator
-      return await this.orchestrator.orchestrateSession(config, metadata, context);
+      // Use session manager to get or create session
+      return await NovaSessionManager.getOrCreateSession(
+        workflowId,
+        nodeId, 
+        chatId,
+        config, 
+        metadata, 
+        context
+      );
     } catch (error: any) {
       // Handle timeout errors gracefully
       if (AwsErrorHandler.isTimeoutError(error)) {
@@ -51,12 +68,19 @@ export class NovaSpeechService {
         };
       }
 
+      const workflowId = metadata.workflowId || context.workflowId || "unknown-workflow";
+      const nodeId = context.nodeId || "unknown-node";
+      const chatId = metadata.chatId || "unknown-chat";
+
       this.logger.error("Failed to generate speech", {
         error: error.message,
         errorName: error.name,
         errorCode: error.code,
         statusCode: error.$metadata?.httpStatusCode,
         requestId: error.$metadata?.requestId,
+        workflowId,
+        nodeId,
+        chatId,
         config: {
           hasSystemPrompt: !!config.systemPrompt,
           hasAudioInput: !!config.audioInput,

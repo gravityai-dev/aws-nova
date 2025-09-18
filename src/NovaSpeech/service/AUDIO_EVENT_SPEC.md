@@ -156,6 +156,28 @@ Nova processes audio → Returns audio response
 Client → GraphQL (END_CALL) → Workflow → Nova Node → Session Cleanup
 ```
 
+## Recent Learnings & Updates
+
+### Audio Feedback Loop Prevention
+- **Problem**: Nova's audio output was being captured by microphone and sent back as input
+- **Solution**: Client immediately mutes microphone when first audio chunk arrives from Nova
+- **Key**: DirectStreamingAudioPlayer calls onAudioReceived callback on first chunk, not on playback start
+
+### Error Recovery Best Practices
+- **AWS Recommendation**: Always send cleanup events (contentEnd, promptEnd, sessionEnd) when errors occur
+- **Implementation**: Nova now sends full cleanup sequence on START_CALL to ensure clean state
+- **Benefit**: Prevents Nova from getting stuck in bad state from previous errors
+
+### Audio Chunk Buffering
+- **Server-side**: Buffer small 2.5KB chunks into 10KB chunks before publishing
+- **Client-side**: Wait for 3+ chunks before processing to reduce gaps
+- **Result**: Smoother audio playback without jumpiness
+
+### Publishing Reliability
+- **Issue**: Direct Redis operations can hang or fail silently
+- **Solution**: Always use platform's gravityPublish function
+- **Pattern**: Fire-and-forget with error logging, no await on publish
+
 ## Key Design Decisions
 
 1. **Dual Channel Approach**:
@@ -186,6 +208,8 @@ Client → GraphQL (END_CALL) → Workflow → Nova Node → Session Cleanup
    - Set `isAudio: false` for START_CALL/END_CALL
    - Set `isAudio: true` for audio data chunks
    - No need to send segment control signals
+   - **NEW**: Implement audio feedback prevention (mute mic when Nova speaks)
+   - **NEW**: Buffer audio chunks client-side for smoother playback
 
 2. **Server Side (gravityTalkToAgent)**:
    - Check `metadata.action` for START_CALL/END_CALL only
@@ -196,6 +220,8 @@ Client → GraphQL (END_CALL) → Workflow → Nova Node → Session Cleanup
    - Automatically wrap audio chunks with contentStart/contentEnd
    - Generate unique `contentName` per audio chunk or batch
    - Handle silence detection internally
+   - **NEW**: Send cleanup events on START_CALL for clean session state
+   - **NEW**: Buffer audio chunks server-side before publishing
 
 ## Error Handling
 
@@ -203,6 +229,9 @@ Client → GraphQL (END_CALL) → Workflow → Nova Node → Session Cleanup
 2. **Wrong NodeId**: Skip processing (different Nova instance)
 3. **Missing ContentName**: Auto-create with timestamp
 4. **Invalid Audio Format**: Log error and skip chunk
+5. **AWS Errors**: Send full cleanup sequence (contentEnd, promptEnd, sessionEnd)
+6. **Timeout Errors**: Gracefully end session with synthetic completion events
+7. **Publishing Failures**: Log error but continue (fire-and-forget pattern)
 
 ## Future Considerations
 
