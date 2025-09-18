@@ -14,7 +14,7 @@ import { EventMetadata } from "../events/eventHelpers";
 import { EventMetadataProcessor } from "../events/EventMetadataProcessor";
 import { delay } from "../stream/utils/timing";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
-import { NodeHttp2Handler } from "@smithy/node-http-handler";
+import { BedrockClientFactory } from "../client/BedrockClientFactory";
 import { createLogger, getNodeCredentials } from "../redis/publishAudioChunk";
 
 export class SessionOrchestrator {
@@ -31,8 +31,8 @@ export class SessionOrchestrator {
       throw new Error("AWS credentials not found");
     }
 
-    // Create Bedrock client
-    const bedrockClient = this.createBedrockClient(credentials);
+    // Create Bedrock client with explicit Nova Speech configuration
+    const bedrockClient = BedrockClientFactory.create(credentials, BedrockClientFactory.NOVA_SPEECH_CONFIG);
 
     // Initialize session components
     const sessionManager = new SessionManager();
@@ -129,23 +129,6 @@ export class SessionOrchestrator {
     return result;
   }
 
-  /**
-   * Creates Bedrock client with HTTP/2 handler
-   */
-  private createBedrockClient(credentials: any): BedrockRuntimeClient {
-    const http2Handler = new NodeHttp2Handler({
-      requestTimeout: 300000,
-      sessionTimeout: 300000,
-      disableConcurrentStreams: false,
-      maxConcurrentStreams: 5,
-    });
-
-    return new BedrockRuntimeClient({
-      region: "us-east-1",
-      credentials,
-      requestHandler: http2Handler,
-    });
-  }
 
   /**
    * Sends initial events (start, system prompt, history)

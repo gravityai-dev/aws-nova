@@ -80,9 +80,9 @@ export interface PromptStartEvent {
  * Session start event - initializes the session with inference configuration
  */
 export function createSessionStartEvent(
-  temperature: number = 0.7,
+  temperature: number = 0.2,
   maxTokens: number = 4096,
-  topP: number = 0.9
+  topP: number = 0.2
 ): SessionStartEvent {
   const event = {
     event: {
@@ -208,7 +208,7 @@ export function createStartEvents(
     maxTokens: config.maxTokens,
     enableTextOutput,
   });
-  
+
   return [
     createSessionStartEvent(config.temperature, config.maxTokens, config.topP),
     createPromptStartEvent(promptName, voiceId, enableTextOutput),

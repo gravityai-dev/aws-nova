@@ -37,9 +37,13 @@ export class TextAccumulator {
       this.isAssistantFinalResponse = true;
       // Clear any previous assistant response to prevent mixing interrupted responses
       this.assistantResponse = "";
+      // COMMENTED OUT: Not using textOutput accumulation anymore
+      // this.textOutput = this.transcription; // Keep transcription, reset assistant part
     } else if (role === "USER") {
       // Clear any previous transcription when starting new user input
       this.transcription = "";
+      // COMMENTED OUT: Not using textOutput accumulation anymore
+      // this.textOutput = "";
     }
   }
 
@@ -60,7 +64,8 @@ export class TextAccumulator {
     }
 
     // Also maintain full text output for backward compatibility
-    this.textOutput += textOutput.content;
+    // COMMENTED OUT: Nova likely provides full transcript at end, this causes corruption
+    // this.textOutput += textOutput.content;
 
     this.logger.info(`📝 Text output received: {
   sessionId: '${this.sessionId}',
@@ -102,9 +107,11 @@ export class TextAccumulator {
 
   /**
    * Gets the full text output (for backward compatibility)
+   * Now computed from separate fields instead of corrupted accumulator
    */
   getFullTextOutput(): string {
-    return this.textOutput;
+    // Return computed combination instead of corrupted textOutput
+    return this.transcription + this.assistantResponse;
   }
 
   /**

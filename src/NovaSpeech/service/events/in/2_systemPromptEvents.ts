@@ -47,7 +47,7 @@ export function createSystemPromptContentStart(promptName: string, contentName: 
         promptName: promptName,
         contentName: contentName,
         type: "TEXT",
-        interactive: false,
+        interactive: true,
         role: "SYSTEM",
         textInputConfiguration: {
           mediaType: "text/plain",

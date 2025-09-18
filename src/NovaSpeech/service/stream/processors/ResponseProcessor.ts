@@ -94,7 +94,8 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
           break;
 
         case "usageEvent":
-          this.usageStatsCollector.processUsageEvent(jsonResponse as UsageEvent);
+          // COMMENTED OUT: Nova provides final usage stats at end, no need to accumulate
+          // this.usageStatsCollector.processUsageEvent(jsonResponse as UsageEvent);
           break;
 
         case "streamComplete":
@@ -195,11 +196,11 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     const completionEnd = event.event.completionEnd;
     this.completionReceived = true;
 
-    // Update final usage stats with accumulated text
-    const textResults = this.textAccumulator.getResults();
-    this.usageStatsCollector.setTextResults(textResults.transcription, textResults.assistantResponse);
-    this.usageStatsCollector.setTextOutput(textResults.fullTextOutput);
-    this.usageStatsCollector.setAudioOutput(""); // No longer accumulating audio
+    // COMMENTED OUT: Nova provides final usage stats, no need to manually update
+    // const textResults = this.textAccumulator.getResults();
+    // this.usageStatsCollector.setTextResults(textResults.transcription, textResults.assistantResponse);
+    // this.usageStatsCollector.setTextOutput(textResults.fullTextOutput);
+    // this.usageStatsCollector.setAudioOutput(""); // No longer accumulating audio
 
     // DO NOT trigger completion callback - this is just Nova finishing its response
     console.log("🏁 CompletionEnd received - Nova finished responding, but call remains open");
