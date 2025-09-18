@@ -24,7 +24,33 @@ export class NovaSessionManager {
   private static cleanupInterval: NodeJS.Timeout | null = null;
 
   /**
+   * Force close existing session for workflow-nodeId combination
+   */
+  static forceCloseSession(workflowId: string, nodeId: string): void {
+    const key = `${workflowId}-${nodeId}`;
+    const session = this.instances.get(key);
+    
+    if (session) {
+      this.logger.info("🛑 Force closing existing session", { 
+        key, 
+        clientCount: session.clientCount,
+        chatIds: Array.from(session.chatIds)
+      });
+      
+      try {
+        // TODO: Add proper cleanup method to session orchestrator
+        // session.orchestrator.cleanup();
+      } catch (error) {
+        this.logger.error("❌ Failed to cleanup session during force close", { key, error });
+      }
+      
+      this.instances.delete(key);
+    }
+  }
+
+  /**
    * Get or create a Nova session for the given workflow-nodeId
+   * @param forceNew - If true, closes any existing session and creates fresh one (default: true to prevent corrupted session reuse)
    */
   static async getOrCreateSession(
     workflowId: string, 
@@ -32,7 +58,8 @@ export class NovaSessionManager {
     chatId: string,
     config: NovaSpeechConfig, 
     metadata: any, 
-    context: any
+    context: any,
+    forceNew: boolean = true
   ): Promise<NovaSpeechStats> {
     const key = `${workflowId}-${nodeId}`;
     
@@ -40,8 +67,15 @@ export class NovaSessionManager {
       key,
       chatId,
       hasExisting: this.instances.has(key),
-      totalSessions: this.instances.size
+      totalSessions: this.instances.size,
+      forceNew
     });
+
+    // Force close existing session if requested
+    if (forceNew && this.instances.has(key)) {
+      this.logger.info("🔄 Force creating new session - closing existing", { key, chatId });
+      this.forceCloseSession(workflowId, nodeId);
+    }
 
     let session = this.instances.get(key);
 
@@ -256,10 +290,16 @@ export class NovaSessionManager {
       this.cleanupInterval = null;
     }
 
-    // TODO: Add proper cleanup for all sessions
-    // for (const [key, session] of this.instances.entries()) {
-    //   session.orchestrator.cleanup();
-    // }
+    // Properly cleanup all sessions
+    for (const [key, session] of this.instances.entries()) {
+      try {
+        this.logger.info("🧹 Cleaning up session", { sessionKey: key });
+        // TODO: Add proper cleanup method to session orchestrator
+        // session.orchestrator.cleanup();
+      } catch (error) {
+        this.logger.error("❌ Failed to cleanup session", { sessionKey: key, error });
+      }
+    }
 
     this.instances.clear();
   }

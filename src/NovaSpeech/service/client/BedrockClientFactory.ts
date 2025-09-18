@@ -37,7 +37,7 @@ export class BedrockClientFactory {
     region: "us-east-1",
     requestTimeout: 300000,
     sessionTimeout: 300000,
-    disableConcurrentStreams: false, // Nova needs concurrent streams for real-time processing
+    disableConcurrentStreams: false,
     maxConcurrentStreams: 5,
   };
 }

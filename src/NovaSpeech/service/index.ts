@@ -37,14 +37,15 @@ export class NovaSpeechService {
         chatId
       });
 
-      // Use session manager to get or create session
+      // Use session manager to get or create session (force new to prevent corrupted session reuse)
       return await NovaSessionManager.getOrCreateSession(
         workflowId,
         nodeId, 
         chatId,
         config, 
         metadata, 
-        context
+        context,
+        true // Force new session - closes any existing corrupted sessions
       );
     } catch (error: any) {
       // Handle timeout errors gracefully
