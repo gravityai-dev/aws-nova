@@ -1,0 +1,173 @@
+/**
+ * Session orchestrator for Nova Speech
+ * Coordinates the session lifecycle
+ */
+
+import { getPlatformDependencies } from "@gravityai-dev/plugin-base";
+import { NovaSpeechConfig, StreamUsageStats, StreamingMetadata } from "../../api/types";
+import { EventQueue, SessionManager, StreamHandler } from "../streaming";
+import { NovaSpeechResponseProcessor } from "../processing";
+import { BedrockClientFactory, AWSCredentials } from "../../io/aws/BedrockClientFactory";
+import { EventInitializer } from "./EventInitializer";
+import { AudioStreamManager } from "./AudioStreamManager";
+import { StreamProcessor } from "./StreamProcessor";
+import { delay } from "../../utils/timing";
+
+const { createLogger } = getPlatformDependencies();
+
+/**
+ * Orchestrates Nova Speech sessions
+ */
+export class SessionOrchestrator {
+  private readonly modelId = "amazon.nova-sonic-v1:0";
+  private readonly logger = createLogger("SessionOrchestrator");
+  private eventInitializer: EventInitializer;
+  private audioStreamManager: AudioStreamManager;
+  private streamProcessor: StreamProcessor;
+
+  constructor() {
+    this.eventInitializer = new EventInitializer();
+    this.audioStreamManager = new AudioStreamManager();
+    this.streamProcessor = new StreamProcessor();
+  }
+
+  /**
+   * Orchestrates a Nova Speech session
+   */
+  async orchestrateSession(
+    config: NovaSpeechConfig,
+    metadata: StreamingMetadata,
+    context: any
+  ): Promise<StreamUsageStats> {
+    // Check for MCP services and get tools if available
+    let mcpTools = undefined;
+    let mcpSchema: any = undefined;
+    const platformDeps = getPlatformDependencies();
+    
+    if (context) {
+      try {
+        this.logger.info("Platform dependencies available:", { 
+          hasCallService: !!platformDeps.callService,
+          availableFunctions: Object.keys(platformDeps).filter(k => typeof platformDeps[k] === 'function')
+        });
+        
+        this.logger.info("Context structure:", {
+          hasWorkflow: !!context.workflow,
+          workflowId: context.workflow?.id,
+          nodeId: context.nodeId,
+          executionId: context.executionId,
+          contextKeys: Object.keys(context)
+        });
+        
+        if (platformDeps.callService) {
+          mcpSchema = await platformDeps.callService("getSchema", {}, context);
+          
+          if (mcpSchema?.methods) {
+            this.logger.info(`MCP tools available: ${Object.keys(mcpSchema.methods).length} methods`);
+            
+            // Convert MCP schema to Nova tools format
+            mcpTools = Object.entries(mcpSchema.methods).map(([methodName, methodSchema]: [string, any]) => ({
+              toolSpec: {
+                name: methodName,
+                description: methodSchema.description || `Execute ${methodName} operation`,
+                inputSchema: {
+                  json: JSON.stringify(methodSchema.input || { type: "object", properties: {} })
+                },
+              },
+            }));
+          }
+        } else {
+          this.logger.warn("callService not available in platform dependencies");
+        }
+      } catch (error) {
+        // No MCP service connected - continue without tools
+        this.logger.debug("No MCP service connected", { error: (error as Error).message });
+      }
+    }
+    
+    // Add MCP tools to config if found
+    if (mcpTools && mcpSchema?.methods) {
+      config.tools = mcpTools;
+      
+      // Also create service functions for each tool
+      config.mcpService = {};
+      for (const [methodName, methodSchema] of Object.entries(mcpSchema.methods)) {
+        config.mcpService[methodName] = async (input: any) => {
+          this.logger.info(`Calling MCP method: ${methodName}`, { input });
+          return platformDeps.callService(methodName, input, context);
+        };
+      }
+    }
+
+    // Fetch AWS credentials internally
+    const { getNodeCredentials } = getPlatformDependencies();
+    const credentials = await getNodeCredentials(context, "awsCredential");
+    
+    if (!credentials?.accessKeyId || !credentials?.secretAccessKey) {
+      throw new Error("AWS credentials not found");
+    }
+
+    // Create Bedrock client
+    const bedrockClient = BedrockClientFactory.create(credentials, BedrockClientFactory.NOVA_SPEECH_CONFIG);
+
+    // Initialize session
+    const sessionManager = new SessionManager();
+    const streamHandler = new StreamHandler(bedrockClient);
+    const responseProcessor = new NovaSpeechResponseProcessor(
+      metadata,
+      config,
+      metadata.workflowId || "unknown",
+      metadata.chatId || "unknown"
+    );
+
+    const session = sessionManager.createSession(config, metadata, responseProcessor);
+    const sessionId = session.sessionId;
+    const promptName = metadata.chatId || `prompt-${sessionId}`;
+
+    session.eventQueue = new EventQueue(sessionId);
+
+    // Start streaming
+    const streamPromise = streamHandler.startStream(
+      session,
+      { modelId: this.modelId },
+      session.eventQueue,
+      (response, session) => this.streamProcessor.processOutputStream(response, session)
+    );
+
+    streamPromise.catch((error) => {
+      this.logger.error("Stream error:", error);
+      session.eventQueue?.close();
+    });
+
+    // Initialize events
+    await this.eventInitializer.sendInitialEvents(config, promptName, sessionId, metadata, session.eventQueue);
+
+    await delay(800);
+
+    // Handle audio streaming with context for nodeId
+    await this.audioStreamManager.handleAudioStreaming(config, promptName, sessionId, metadata, session, context);
+
+    // Wait for completion
+    try {
+      await streamPromise;
+    } catch (error: any) {
+      this.logger.error("Stream processing failed", { error, sessionId });
+      throw error;
+    }
+
+    // Get results
+    const result = session.responseProcessor?.getUsageStats() || {
+      estimated: true,
+      total_tokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      chunk_count: 0,
+      textOutput: "",
+      transcription: "",
+      assistantResponse: "",
+    };
+
+    sessionManager.endSession(sessionId);
+    return result;
+  }
+}

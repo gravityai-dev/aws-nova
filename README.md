@@ -92,21 +92,116 @@ interface NovaSpeechConfig {
 }
 ```
 
-## Real-time Audio Streaming
+## Real-time Audio Streaming Architecture
 
-Audio is streamed in real-time via Redis:
+### Control Flow vs Data Flow Separation
+
+The Nova Speech integration uses a clean separation between control signals and audio data:
+
+#### Control Signals (via GraphQL)
+- **START_CALL** - Initiates workflow and Nova session
+- **END_CALL** - Terminates session and cleanup
+
+#### Data Flow (Direct Redis Streaming)
+- Audio chunks stream directly to Redis `Audio-Stream` channel
+- Bypasses GraphQL for real-time performance
+- No buffering overhead - immediate streaming
+
+### Streaming Sequence
+
+```
+1. Client → GraphQL: START_CALL
+2. Server → Workflow → Nova: Initialize session
+3. Nova → Redis: Publishes AUDIO_SESSION_READY
+4. Client: Waits for AUDIO_SESSION_READY signal
+5. Client → Redis: Streams audio chunks directly
+6. Nova → Redis: Publishes audio responses
+7. Client → GraphQL: END_CALL (when done)
+```
+
+### Audio Channel Format
 
 ```typescript
-// Subscribe to audio stream
-const redis = new Redis();
-redis.subscribe('audio-stream-channel');
+// Incoming audio to Nova (Audio-Stream channel)
+{
+  chatId: string,
+  nodeId: `${nodeId}-${workflowId}`, // e.g., "awsnovaspeech1-workflow_123"
+  workflowId: string,
+  audioData: string,  // Base64 PCM audio
+  action: "SEND_AUDIO" | "START_AUDIO_SEGMENT" | "END_AUDIO_SEGMENT",
+  timestamp: number
+}
 
-redis.on('message', (channel, message) => {
-  const audioChunk = JSON.parse(message);
-  // audioChunk.audioData contains Base64 MP3 data
-  playAudioChunk(audioChunk.audioData);
-});
+// Outgoing audio from Nova (AI Results channel)
+{
+  audioData: string,  // Base64 MP3 audio
+  format: "mp3",
+  metadata: {
+    audioState: AudioState,
+    chatId: string,
+    workflowId: string
+  }
+}
 ```
+
+### Client Implementation
+
+```typescript
+// 1. Start call via GraphQL
+const response = await talkToAgent({
+  message: "START_CALL",
+  isAudio: true,
+  metadata: {
+    action: "START_CALL",
+    workflowId: "workflow_123",
+    nodeId: "awsnovaspeech1"
+  }
+});
+
+// 2. Subscribe to audio state updates
+redis.subscribe('gravity:output');
+redis.on('message', (channel, message) => {
+  const data = JSON.parse(message);
+  if (data.metadata?.audioState === 'AUDIO_SESSION_READY') {
+    // 3. Start streaming audio
+    startAudioStreaming();
+  }
+});
+
+// 4. Stream audio directly to Redis
+function streamAudioChunk(audioData: string) {
+  redis.publish('Audio-Stream', JSON.stringify({
+    chatId,
+    nodeId: `awsnovaspeech1-${workflowId}`,
+    workflowId,
+    audioData,
+    action: "SEND_AUDIO",
+    timestamp: Date.now()
+  }));
+}
+```
+
+### Key Architectural Decisions
+
+1. **Why wait for AUDIO_SESSION_READY?**
+   - Nova needs time to establish bidirectional stream with AWS
+   - Audio sent before ready signal will be lost
+   - Ensures reliable audio delivery
+
+2. **Why separate control and data planes?**
+   - GraphQL for control = reliable state management
+   - Redis for audio = real-time performance
+   - Clean separation of concerns
+
+3. **Why use composite nodeId-workflowId?**
+   - Supports multiple workflows running simultaneously
+   - Enables multiple Nova nodes per workflow
+   - Stable nodeId allows direct routing without discovery
+
+4. **Why no buffering?**
+   - Reduces latency for real-time conversation
+   - Simplifies client implementation
+   - Nova handles internal buffering as needed
 
 ## Tool Integration
 

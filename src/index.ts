@@ -11,8 +11,8 @@ const plugin = createPlugin({
     const { initializePlatformFromAPI } = await import("@gravityai-dev/plugin-base");
     initializePlatformFromAPI(api);
 
-    // Import and register NovaSpeech node
-    const { NovaSpeechNode } = await import("./NovaSpeech/node");
+    // Import and register NovaSpeech node (using refactored version)
+    const { NovaSpeechNode } = await import("./Nova/node");
     api.registerNode(NovaSpeechNode);
 
     // Import and register AWS credential (will use existing if already registered)
