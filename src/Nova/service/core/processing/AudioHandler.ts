@@ -3,8 +3,8 @@
  */
 
 import { getPlatformDependencies } from "@gravityai-dev/plugin-base";
-import { AudioPublisher } from "../../io/redis/publishers/AudioPublisher";
-import { StreamingMetadata, AudioState } from "../../api/types";
+import { AudioState, StreamingMetadata } from "../../api/types";
+import { AudioPublisherFactory } from "../../io/publishers/AudioPublisherFactory";
 
 const { createLogger } = getPlatformDependencies();
 const logger = createLogger("AudioHandler");
@@ -50,37 +50,54 @@ export class AudioHandler {
     console.log("🔊 Nova started speaking - publishing NOVA_SPEECH_STARTED state");
     this.audioState.generationComplete = false;
 
-    AudioPublisher.publishState({
-      state: "NOVA_SPEECH_STARTED",
-      sessionId,
-      metadata,
-      message: "Nova has started speaking - microphone should be muted",
-    }).catch((error: any) => {
-      logger.error("Failed to publish NOVA_SPEECH_STARTED", { error: error.message });
-    });
+    // Use conversationId for WebSocket publishing (that's what the client connects with)
+    const publishSessionId = metadata.conversationId || sessionId;
+
+    // Get appropriate publisher for this session
+    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+
+    publisher
+      .publishState({
+        state: "NOVA_SPEECH_STARTED",
+        sessionId: publishSessionId,
+        metadata,
+        message: "Nova has started speaking - microphone should be muted",
+      })
+      .catch((error: any) => {
+        logger.error("Failed to publish NOVA_SPEECH_STARTED", { error: error.message });
+      });
   }
 
   /**
-   * Buffer audio chunk and flush when appropriate
+   * Handle audio chunk - just proxy it directly
    */
-  bufferAudioChunk(audioData: string): void {
-    this.audioState.buffer.push(audioData);
-    this.audioState.size += audioData.length;
+  async bufferAudioChunk(audioData: string): Promise<void> {
+    const { metadata, sessionId } = this.context;
 
-    // Clear any existing timeout
-    if (this.audioState.timeout) {
-      clearTimeout(this.audioState.timeout);
-      this.audioState.timeout = null;
-    }
+    // Use conversationId for WebSocket publishing
+    const publishSessionId = metadata.conversationId || sessionId;
 
-    // Flush if we've reached target size
-    if (this.audioState.size >= AUDIO_BUFFER_TARGET_SIZE) {
-      this.flushAudioBuffer();
-    } else {
-      // Set timeout to flush after max delay
-      this.audioState.timeout = setTimeout(() => {
-        this.flushAudioBuffer();
-      }, AUDIO_BUFFER_MAX_DELAY);
+    // Get appropriate publisher for this session
+    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+
+    try {
+      // Await the publish to provide backpressure to Nova
+      await publisher.publishAudio({
+        audioData: audioData,
+        format: "lpcm",
+        sourceType: "NovaSpeech",
+        index: this.chunkIndex++,
+        sessionId: publishSessionId,
+        metadata,
+        audioState: "NOVA_SPEECH_STREAMING" as AudioState,
+      });
+    } catch (error: any) {
+      logger.error("Failed to publish audio", {
+        error: error.message,
+        sessionId,
+        index: this.chunkIndex - 1,
+      });
+      // Don't throw - let Nova continue even if we can't publish
     }
   }
 
@@ -89,90 +106,72 @@ export class AudioHandler {
    */
   markAudioComplete(): void {
     this.audioState.generationComplete = true;
-    // Flush any remaining audio
-    if (this.audioState.buffer.length > 0) {
-      this.flushAudioBuffer();
+    // No buffering, so nothing to flush
+  }
+
+  /**
+   * Get audio output if available
+   */
+  getAudioOutput(): string {
+    // No buffering, audio is sent directly - return empty string
+    return "";
+  }
+
+  /**
+   * Cleanup audio handler state
+   */
+  cleanup(): void {
+    // Clear any pending timeout
+    if (this.audioState.timeout) {
+      clearTimeout(this.audioState.timeout);
+      this.audioState.timeout = null;
     }
+
+    // Reset audio state
+    this.audioState = {
+      buffer: [],
+      size: 0,
+      timeout: null,
+      generationComplete: false,
+    };
+
+    // Reset chunk index
+    this.chunkIndex = 0;
+
+    logger.debug("AudioHandler cleaned up", {
+      sessionId: this.context.sessionId,
+    });
   }
 
   /**
    * Handle audio content end - send final state
    */
-  handleAudioEnd(): void {
+  async handleAudioEnd(): Promise<void> {
     const { metadata, sessionId } = this.context;
-
-    // Flush any remaining buffered audio
-    if (this.audioState.buffer.length > 0) {
-      this.flushAudioBuffer();
-    }
 
     console.log("🔇 Nova finished speaking - publishing NOVA_SPEECH_ENDED state");
 
-    AudioPublisher.publishState({
-      state: "NOVA_SPEECH_ENDED",
-      sessionId,
-      metadata,
-      message: "Nova has finished speaking - microphone can be unmuted",
-    }).catch((error: any) => {
-      logger.error("Failed to publish NOVA_SPEECH_ENDED", { error: error.message });
-    });
-  }
+    // Use conversationId for WebSocket publishing
+    const publishSessionId = metadata.conversationId || sessionId;
 
-  /**
-   * Flush buffered audio chunks
-   */
-  private flushAudioBuffer(): void {
-    if (this.audioState.buffer.length === 0) return;
+    // Get appropriate publisher for this session
+    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
 
-    const { metadata, sessionId } = this.context;
-    const combinedAudio = this.audioState.buffer.join("");
-
-    const audioState = this.audioState.generationComplete ? "NOVA_SPEECH_ENDED" : "NOVA_SPEECH_STREAMING";
-
-    AudioPublisher.publishAudio({
-      audioData: combinedAudio,
-      format: "lpcm",
-      sourceType: "NovaSpeech",
-      index: this.chunkIndex++,
-      sessionId,
-      metadata,
-      audioState: audioState as AudioState,
-    }).catch((error: any) => {
-      logger.error("Failed to publish audio chunk", {
-        error: error.message,
-        chunkSize: combinedAudio.length,
-        audioState,
+    try {
+      await publisher.publishState({
+        state: "NOVA_SPEECH_ENDED",
+        sessionId: publishSessionId,
+        metadata,
+        message: "Nova has finished speaking - microphone can be unmuted",
       });
-    });
 
-    // Clear buffer
-    this.audioState.buffer = [];
-    this.audioState.size = 0;
-
-    // Clear timeout
-    if (this.audioState.timeout) {
-      clearTimeout(this.audioState.timeout);
-      this.audioState.timeout = null;
+      // Clean up any buffered audio in the publisher
+      if (publisher.cleanup) {
+        await publisher.cleanup(publishSessionId);
+        logger.debug("Audio publisher cleanup completed", { sessionId: publishSessionId });
+      }
+    } catch (error: any) {
+      logger.error("Failed to publish NOVA_SPEECH_ENDED or cleanup", { error: error.message });
     }
-  }
-
-  /**
-   * Get combined audio output
-   */
-  getAudioOutput(): string {
-    // This would typically be implemented if we need to return all audio
-    return "";
-  }
-
-  /**
-   * Cleanup resources
-   */
-  cleanup(): void {
-    if (this.audioState.timeout) {
-      clearTimeout(this.audioState.timeout);
-      this.audioState.timeout = null;
-    }
-    this.audioState.buffer = [];
-    this.audioState.size = 0;
   }
 }

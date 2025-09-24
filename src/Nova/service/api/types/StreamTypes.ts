@@ -19,6 +19,8 @@ export type AudioState =
   | 'USER_SPEECH_STARTED'
   | 'USER_SPEECH_STREAMING'
   | 'USER_SPEECH_ENDED'
+  // Tool use states
+  | 'NOVA_TOOL_USE'
   // Special states
   | 'AUDIO_SIGNAL'
   | 'SILENCE';

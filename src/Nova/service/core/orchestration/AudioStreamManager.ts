@@ -5,11 +5,12 @@
 import { getPlatformDependencies } from "@gravityai-dev/plugin-base";
 import { NovaSpeechConfig, StreamingMetadata } from "../../api/types";
 import { NovaSpeechSession } from "../streaming";
-import { AudioSubscriber } from "../../io/redis/subscribers";
-import { AudioPublisher } from "../../io/redis/publishers";
+// Import WebSocket publisher for state events
+import { WebSocketAudioPublisher } from "../../io/publishers/WebSocketAudioPublisher";
 import { EventMetadataProcessor, EventMetadata } from "../../io/events/metadata/EventMetadataProcessor";
 import { AudioEventBuilder, EndEventBuilder, ToolResponseBuilder } from "../../io/events/incoming/builders";
 import { TIMING_DELAYS } from "../../utils/timing";
+import { WebSocketAudioSubscriber } from "../../io/websocket/WebSocketAudioSubscriber";
 
 const { createLogger } = getPlatformDependencies();
 
@@ -72,46 +73,53 @@ export class AudioStreamManager {
       hasContext: !!context
     });
 
-    // Create audio subscriber with all required parameters
-    const nodeId = context?.nodeId || "awsnovaspeech1";
-    this.logger.info("Creating AudioSubscriber", {
-      nodeId,
-      chatId: metadata.chatId,
-      workflowId: metadata.workflowId,
-      compositeNodeId: `${nodeId}-${metadata.workflowId}`
-    });
-    
-    const audioSubscriber = new AudioSubscriber(
-      metadata.chatId || "",
-      nodeId,
-      metadata.workflowId || sessionId,
-      session.eventQueue!,
-      eventMetadata,
-      promptName
-    );
+    // Using WebSocket audio only - Redis audio subscriber removed
 
-    // Start listening for audio
-    await audioSubscriber.start();
+    // Also register WebSocket session if available
+    const wsSubscriber = WebSocketAudioSubscriber.getInstance();
+    if (wsSubscriber) {
+      // Register with conversationId for stable WebSocket connection
+      const wsSessionId = metadata.conversationId || sessionId;
+      wsSubscriber.registerSession(
+        wsSessionId,                    // WebSocket session ID (conversationId)
+        sessionId,                      // Nova session ID
+        metadata.chatId || "",          // Chat ID
+        session.eventQueue!,            // Event queue
+        eventMetadata                   // Pass the same metadata used for Redis
+      );
+      this.logger.info("✅ WebSocket audio session registered", { 
+        wsSessionId, 
+        conversationId: metadata.conversationId,
+        novaSessionId: sessionId, 
+        chatId: metadata.chatId 
+      });
+    }
 
-    // Store subscriber on session for cleanup
-    (session as any).audioSubscriber = audioSubscriber;
-
-    // Publish session ready state with actual nodeId
-    const publishNodeId = context?.nodeId || "awsnovaspeech1";
-    await AudioPublisher.publishSessionReady(sessionId, metadata, publishNodeId, {
-      queueSize: 0,
-      maxQueueSize: 50,
+    // Publish session ready state via WebSocket
+    const wsPublisher = new WebSocketAudioPublisher();
+    await wsPublisher.publishState({
+      state: "AUDIO_SESSION_READY",
+      sessionId: metadata.conversationId || sessionId,
+      metadata,
+      message: "Audio session is ready to receive input",
+      additionalMetadata: {
+        nodeId: context?.nodeId || "awsnovaspeech1",
+        queueInfo: {
+          queueSize: 0,
+          maxQueueSize: 50,
+        }
+      }
     });
   }
 
   private async endAudioStreaming(session: NovaSpeechSession, eventMetadata: EventMetadata): Promise<void> {
     this.logger.info("📞 Ending call", { sessionId: session.sessionId });
 
-    // Stop audio subscriber if it exists
-    const audioSubscriber = (session as any).audioSubscriber;
-    if (audioSubscriber && typeof audioSubscriber.stop === "function") {
-      await audioSubscriber.stop();
-      delete (session as any).audioSubscriber;
+    // Unregister WebSocket session
+    const wsSubscriber = WebSocketAudioSubscriber.getInstance();
+    if (wsSubscriber) {
+      wsSubscriber.unregisterSession(session.sessionId);
+      this.logger.info("✅ WebSocket audio session unregistered", { sessionId: session.sessionId });
     }
 
     const sessionEndEvent = EndEventBuilder.createSessionEnd();

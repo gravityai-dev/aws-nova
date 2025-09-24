@@ -11,6 +11,10 @@ const plugin = createPlugin({
     const { initializePlatformFromAPI } = await import("@gravityai-dev/plugin-base");
     initializePlatformFromAPI(api);
 
+    // Initialize WebSocket audio subscriber
+    const { WebSocketAudioSubscriber } = await import("./Nova/service/io/websocket/WebSocketAudioSubscriber");
+    WebSocketAudioSubscriber.getInstance();
+
     // Import and register NovaSpeech node (using refactored version)
     const { NovaSpeechNode } = await import("./Nova/node");
     api.registerNode(NovaSpeechNode);

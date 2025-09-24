@@ -90,7 +90,7 @@ export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig>
           conversationHistory: config.conversationHistory,
           voice: config.voice as VoiceOption,
           redisChannel: config.redisChannel,
-          maxTokens: config.maxTokens || 4096,
+          maxTokens: config.maxTokens || 2000,
           temperature: config.temperature || 0.7,
           topP: config.topP || 0.3,
           controlSignal: "START_CALL", // Always start call when node executes

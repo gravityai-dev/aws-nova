@@ -101,6 +101,14 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
           maximum: 1,
           "ui:widget": "range",
         },
+        maxTokens: {
+          type: "number",
+          title: "Max Tokens",
+          description: "Maximum number of tokens to generate",
+          default: 2000,
+          minimum: 100,
+          maximum: 4096,
+        },
         redisChannel: {
           type: "string",
           title: "Redis Channel",

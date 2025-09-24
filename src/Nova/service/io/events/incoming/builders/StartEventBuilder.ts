@@ -161,17 +161,19 @@ export class StartEventBuilder {
             channelCount: 1,
             voiceId: voiceId as ValidVoiceId,
           },
-          ...(tools && tools.length > 0 ? {
-            toolUseOutputConfiguration: {
-              mediaType: "application/json",
-            },
-            toolConfiguration: {
-              tools: tools,
-              toolChoice: {
-                any: {} // This forces Nova to use one of the available tools
+          ...(tools && tools.length > 0
+            ? {
+                toolUseOutputConfiguration: {
+                  mediaType: "application/json",
+                },
+                toolConfiguration: {
+                  tools: tools,
+                  toolChoice: {
+                    any: {}, // This forces Nova to use one of the available tools
+                  },
+                },
               }
-            },
-          } : {}),
+            : {}),
         },
       },
     };

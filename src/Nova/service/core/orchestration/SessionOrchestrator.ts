@@ -12,6 +12,7 @@ import { EventInitializer } from "./EventInitializer";
 import { AudioStreamManager } from "./AudioStreamManager";
 import { StreamProcessor } from "./StreamProcessor";
 import { delay } from "../../utils/timing";
+import { WebSocketAudioSubscriber } from "../../io/websocket/WebSocketAudioSubscriber";
 
 const { createLogger } = getPlatformDependencies();
 
@@ -134,9 +135,23 @@ export class SessionOrchestrator {
       (response, session) => this.streamProcessor.processOutputStream(response, session)
     );
 
-    streamPromise.catch((error) => {
+    streamPromise.catch(async (error) => {
       this.logger.error("Stream error:", error);
-      session.eventQueue?.close();
+      
+      // Use the AwsErrorHandler to log the error properly
+      const { AwsErrorHandler } = await import("../../utils/errors/AwsErrorHandler");
+      await AwsErrorHandler.handleStreamError(error, { 
+        sessionId,
+        promptId: promptName,
+        responseProcessor: session.responseProcessor ? {
+          handleError: (err: any) => session.responseProcessor!.handleError(err)
+        } : undefined
+      });
+      
+      // Don't close the event queue for ModelStreamErrorException
+      if (error.name !== "ModelStreamErrorException") {
+        session.eventQueue?.close();
+      }
     });
 
     // Initialize events
@@ -152,6 +167,31 @@ export class SessionOrchestrator {
       await streamPromise;
     } catch (error: any) {
       this.logger.error("Stream processing failed", { error, sessionId });
+      
+      // Handle specific AWS errors gracefully
+      if (error.name === "ModelStreamErrorException") {
+        this.logger.warn("Nova encountered a stream error - completing gracefully", {
+          sessionId,
+          errorMessage: error.message
+        });
+        
+        // Return partial results if available
+        const partialResult = session.responseProcessor?.getUsageStats() || {
+          estimated: true,
+          total_tokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          chunk_count: 0,
+          textOutput: "",
+          transcription: "",
+          assistantResponse: "",
+        };
+        
+        sessionManager.endSession(sessionId);
+        return partialResult;
+      }
+      
+      // Re-throw other errors
       throw error;
     }
 

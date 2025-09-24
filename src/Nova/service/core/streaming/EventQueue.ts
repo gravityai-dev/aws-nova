@@ -40,47 +40,66 @@ export class EventQueue {
    * Streams events from the queue
    */
   async *streamEvents() {
-    while (this.isActive || this.queue.length > 0) {
-      // Wait for events if queue is empty
-      if (this.queue.length === 0 && this.isActive) {
-        try {
-          await Promise.race([
-            firstValueFrom(this.queueSignal.pipe(take(1))),
-            firstValueFrom(this.closeSignal.pipe(take(1))).then(() => {
-              throw new Error("Stream closed");
-            }),
-          ]);
-        } catch (error) {
-          if (error instanceof Error && error.message === "Stream closed") {
-            break;
+    try {
+      while (this.isActive || this.queue.length > 0) {
+        // Wait for events if queue is empty
+        if (this.queue.length === 0 && this.isActive) {
+          try {
+            await Promise.race([
+              firstValueFrom(this.queueSignal.pipe(take(1))).catch((error) => {
+                // Handle EmptyError when queueSignal completes without emitting
+                if (error && error.constructor.name === 'EmptyError') {
+                  throw new Error("Stream closed");
+                }
+                throw error;
+              }),
+              firstValueFrom(this.closeSignal.pipe(take(1))).catch((error) => {
+                // Handle EmptyError when closeSignal completes without emitting
+                if (error && error.constructor.name === 'EmptyError') {
+                  throw new Error("Stream closed");
+                }
+                throw error;
+              })
+            ]);
+          } catch (error) {
+            if (error instanceof Error && error.message === "Stream closed") {
+              break;
+            }
+            throw error;
           }
-          throw error;
+        }
+
+        // Process events in queue
+        if (this.queue.length > 0) {
+          const event = this.queue.shift();
+          if (event) {
+            // Convert event to JSON and encode as UTF-8 bytes
+            const eventJson = JSON.stringify(event);
+            const textEncoder = new TextEncoder();
+            // Match the exact format from the working example
+            yield {
+              chunk: {
+                bytes: textEncoder.encode(eventJson),
+              },
+            };
+
+            // No delay between events
+          }
+        }
+
+        // Only exit if queue is closed (not just empty)
+        // We need to keep the stream open even with empty queue to allow for response-triggered events
+        if (!this.isActive && this.queue.length === 0) {
+          break;
         }
       }
-
-      // Process events in queue
-      if (this.queue.length > 0) {
-        const event = this.queue.shift();
-        if (event) {
-          // Convert event to JSON and encode as UTF-8 bytes
-          const eventJson = JSON.stringify(event);
-          const textEncoder = new TextEncoder();
-          // Match the exact format from the working example
-          yield {
-            chunk: {
-              bytes: textEncoder.encode(eventJson),
-            },
-          };
-
-          // No delay between events
-        }
+    } catch (error) {
+      // Catch any EmptyError that might escape
+      if (error && error.constructor.name === 'EmptyError') {
+        // Gracefully exit on EmptyError
+        return;
       }
-
-      // Only exit if queue is closed (not just empty)
-      // We need to keep the stream open even with empty queue to allow for response-triggered events
-      if (!this.isActive && this.queue.length === 0) {
-        break;
-      }
+      throw error;
     }
   }
 

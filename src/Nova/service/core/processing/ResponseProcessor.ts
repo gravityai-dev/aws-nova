@@ -7,7 +7,8 @@ import { StreamUsageStats, StreamingMetadata, NovaSpeechConfig } from "../../api
 import { EventParser, CompletionStartEvent } from "./EventParser";
 import { TextAccumulator } from "./TextAccumulator";
 import { UsageStatsCollector } from "./UsageStatsCollector";
-import { AudioHandler, ProcessorContext } from "./AudioHandler";
+import { AudioHandler } from "./AudioHandler";
+import { AudioPublisherFactory } from "../../io/publishers/AudioPublisherFactory";
 import {
   ContentHandler,
   CompletionHandler,
@@ -25,6 +26,12 @@ import {
 
 const { createLogger } = getPlatformDependencies();
 
+interface ProcessorContext {
+  metadata: StreamingMetadata;
+  sessionId: string;
+  logger: any;
+}
+
 export interface StreamResponseProcessor {
   isComplete(): boolean;
   isCompletionReceived(): boolean;
@@ -35,6 +42,7 @@ export interface StreamResponseProcessor {
   getTranscription(): string;
   getAssistantResponse(): string;
   cleanup(): void;
+  handleError(error: any): Promise<void>;
 }
 
 /**
@@ -184,7 +192,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
    */
   private async handleAudioOutput(event: AudioOutputEvent): Promise<void> {
     const audioData = AudioEventHandler.getAudioContent(event);
-    this.audioHandler.bufferAudioChunk(audioData);
+    await this.audioHandler.bufferAudioChunk(audioData);
     this.usageStatsCollector.incrementChunkCount();
   }
 
@@ -211,7 +219,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     // Handle audio content end
     if (contentType === "AUDIO") {
       this.audioHandler.markAudioComplete();
-      this.audioHandler.handleAudioEnd();
+      await this.audioHandler.handleAudioEnd();
     }
   }
 
@@ -221,18 +229,40 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
   private async handleToolUse(event: ToolUseEvent): Promise<void> {
     const toolName = ToolUseHandler.getToolName(event);
     const toolInput = ToolUseHandler.parseToolInput(event);
+    const toolUseId = ToolUseHandler.getToolUseId(event);
 
     this.logger.info("Tool use requested", {
       sessionId: this.context.sessionId,
       toolName,
-      toolUseId: ToolUseHandler.getToolUseId(event),
+      toolUseId,
     });
+
+    // Publish tool use event through audio stream
+    const { metadata, sessionId } = this.context;
+    const publishSessionId = metadata.conversationId || sessionId;
+    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+
+    await publisher
+      .publishState({
+        state: "NOVA_TOOL_USE",
+        sessionId: publishSessionId,
+        metadata,
+        message: `Nova is using tool: ${toolName}`,
+        additionalMetadata: {
+          toolName,
+          toolUseId,
+          toolInput,
+        },
+      })
+      .catch((error: any) => {
+        this.logger.error("Failed to publish NOVA_TOOL_USE", { error: error.message });
+      });
 
     if (this.onToolUse) {
       this.onToolUse({
         toolName,
         toolInput,
-        toolUseId: ToolUseHandler.getToolUseId(event),
+        toolUseId,
       });
     }
   }
@@ -276,7 +306,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     });
 
     // Ensure audio state is cleaned up
-    this.audioHandler.handleAudioEnd();
+    await this.audioHandler.handleAudioEnd();
   }
 
   // Getter methods

@@ -3,11 +3,8 @@
  */
 
 // Events
-export * from './events';
-
-// Redis
-export * from './redis';
+export * from "./events";
 
 // AWS
-export { BedrockClientFactory } from './aws/BedrockClientFactory';
-export type { BedrockClientConfig, AWSCredentials } from './aws/BedrockClientFactory';
+export { BedrockClientFactory } from "./aws/BedrockClientFactory";
+export type { BedrockClientConfig, AWSCredentials } from "./aws/BedrockClientFactory";
