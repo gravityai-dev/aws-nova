@@ -2,8 +2,8 @@
  * Text accumulator for Nova Speech text output
  */
 
-import { getPlatformDependencies } from '@gravityai-dev/plugin-base';
-import { TextOutputEvent } from '../../io/events/outgoing/handlers';
+import { getPlatformDependencies } from "@gravityai-dev/plugin-base";
+import { TextOutputEvent } from "../../io/events/outgoing/handlers";
 
 const { createLogger } = getPlatformDependencies();
 
@@ -22,11 +22,15 @@ export class TextAccumulator {
   private textOutput = "";
   private currentRole: "USER" | "ASSISTANT" | null = null;
   private isAssistantFinalResponse = false;
-  
+
   private readonly logger: any;
   private readonly sessionId: string;
 
-  constructor(sessionId: string, loggerName: string = 'TextAccumulator') {
+  constructor(
+    sessionId: string, 
+    loggerName: string = "TextAccumulator",
+    private emit?: (output: any) => void
+  ) {
     this.logger = createLogger(loggerName);
     this.sessionId = sessionId;
   }
@@ -36,7 +40,7 @@ export class TextAccumulator {
    */
   setCurrentRole(role: "USER" | "ASSISTANT", generationStage?: string): void {
     this.currentRole = role;
-    
+
     // Reset assistant final response flag
     this.isAssistantFinalResponse = false;
 
@@ -65,11 +69,26 @@ export class TextAccumulator {
 
     // Accumulate based on current context
     if (this.isAssistantFinalResponse) {
-      // This is the assistant's final text response
       this.assistantResponse += textOutput.content;
     } else {
-      // This is the audio transcription (ASR)
+      // This is the audio transcription (ASR) - USER REQUEST
       this.transcription += textOutput.content;
+      
+      // Emit user request when captured
+      if (this.currentRole === 'USER' && this.transcription && this.emit) {
+        this.logger.info(`🎯 Emitting user request from TextAccumulator`, {
+          sessionId: this.sessionId,
+          userRequest: this.transcription,
+          length: this.transcription.length
+        });
+        
+        // Emit the user request as 'text' output
+        this.emit({
+          __outputs: {
+            text: this.transcription
+          }
+        });
+      }
     }
 
     // Also maintain full text output for backward compatibility
@@ -77,17 +96,17 @@ export class TextAccumulator {
     // this.textOutput += textOutput.content;
 
     this.logger.info(`📝 Text output received: {
-  sessionId: '${this.sessionId}',
-  type: '${this.isAssistantFinalResponse ? "ASSISTANT_RESPONSE" : "TRANSCRIPTION"}',
-  currentRole: '${this.currentRole}',
-  isAssistantFinal: ${this.isAssistantFinalResponse},
-  contentLength: ${textOutput.content.length},
-  totalLength: ${this.textOutput?.length || 0},
-  transcriptionLength: ${this.transcription.length},
-  assistantResponseLength: ${this.assistantResponse.length},
-  preview: '${textOutput.content.substring(0, 100)}'
-}`);
+      sessionId: '${this.sessionId}',
+      type: '${this.isAssistantFinalResponse ? "ASSISTANT_RESPONSE" : "TRANSCRIPTION"}',
+      currentRole: '${this.currentRole}',
+      isAssistantFinal: ${this.isAssistantFinalResponse},
+      contentLength: ${textOutput.content.length},
+      totalLength: ${this.textOutput?.length || 0},
+      transcriptionLength: ${this.transcription.length},
+      preview: '${textOutput.content.substring(0, 100)}'
+    }`);
   }
+
 
   /**
    * Gets the current accumulation results
@@ -102,13 +121,13 @@ export class TextAccumulator {
 
   /**
    * Gets just the transcription (user's spoken input)
+   * @deprecated Use getResults().transcription instead
    */
   getTranscription(): string {
     return this.transcription;
   }
 
   /**
-   * Gets just the assistant's response
    */
   getAssistantResponse(): string {
     return this.assistantResponse;
@@ -122,6 +141,7 @@ export class TextAccumulator {
     // Return computed combination instead of corrupted textOutput
     return this.transcription + this.assistantResponse;
   }
+
 
   /**
    * Resets all accumulated text
@@ -149,7 +169,7 @@ export class TextAccumulator {
       isAssistantFinalResponse: this.isAssistantFinalResponse,
       transcriptionLength: this.transcription.length,
       assistantResponseLength: this.assistantResponse.length,
-      fullTextLength: this.textOutput.length
+      fullTextLength: this.textOutput.length,
     };
   }
 }

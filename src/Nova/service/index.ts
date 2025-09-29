@@ -19,9 +19,10 @@ export class NovaSpeechService {
   async generateSpeechStream(
     config: NovaSpeechConfig,
     metadata: StreamingMetadata,
-    context: any
+    context: any,
+    emit?: (output: any) => void
   ): Promise<StreamUsageStats> {
-    return this.orchestrator.orchestrateSession(config, metadata, context);
+    return this.orchestrator.orchestrateSession(config, metadata, context, emit);
   }
 }
 

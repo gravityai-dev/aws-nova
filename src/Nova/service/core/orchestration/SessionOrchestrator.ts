@@ -38,7 +38,8 @@ export class SessionOrchestrator {
   async orchestrateSession(
     config: NovaSpeechConfig,
     metadata: StreamingMetadata,
-    context: any
+    context: any,
+    emit?: (output: any) => void
   ): Promise<StreamUsageStats> {
     // Check for MCP services and get tools if available
     let mcpTools = undefined;
@@ -118,7 +119,9 @@ export class SessionOrchestrator {
       metadata,
       config,
       metadata.workflowId || "unknown",
-      metadata.chatId || "unknown"
+      metadata.chatId || "unknown",
+      undefined, // loggerName
+      emit // Pass the emit function
     );
 
     const session = sessionManager.createSession(config, metadata, responseProcessor);

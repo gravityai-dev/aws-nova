@@ -169,7 +169,7 @@ export class StartEventBuilder {
                 toolConfiguration: {
                   tools: tools,
                   toolChoice: {
-                    any: {}, // This forces Nova to use one of the available tools
+                    auto: {}, // ANY || auto This forces Nova to use one of the available tools
                   },
                 },
               }

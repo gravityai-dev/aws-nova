@@ -2,7 +2,7 @@
  * Tool response event builder for Nova Speech
  */
 
-import { v4 as uuid } from 'uuid';
+import { v4 as uuid } from "uuid";
 
 export interface ToolContentStartEvent {
   event: {
@@ -71,16 +71,16 @@ export class ToolResponseBuilder {
     // Nova expects the tool result content to be a stringified JSON
     // Format the results in a simple structure
     const formattedResult = {
-      results: Array.isArray(toolResult) ? toolResult : [toolResult]
+      results: Array.isArray(toolResult) ? toolResult : [toolResult],
     };
-    
+
     const event = {
       event: {
         toolResult: {
           promptName,
           contentName,
           content: JSON.stringify(formattedResult), // Stringify the result
-          status: "success" as const
+          status: "success" as const,
         },
       },
     };

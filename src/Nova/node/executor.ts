@@ -3,65 +3,76 @@
  * Handles speech generation using AWS Nova Sonic
  */
 
-import { getPlatformDependencies, type NodeExecutionContext, type ValidationResult } from "@gravityai-dev/plugin-base";
-import { AWSNovaSpeechConfig, AWSNovaSpeechInput, AWSNovaSpeechOutput } from "../../util/types";
+import { getPlatformDependencies } from "@gravityai-dev/plugin-base";
+import { AWSNovaSpeechConfig } from "../../util/types";
 import type { VoiceOption } from "../service";
 
-const { PromiseNode, saveTokenUsage, getNodeCredentials } = getPlatformDependencies();
+const { CallbackNode, saveTokenUsage, createLogger } = getPlatformDependencies();
 
-export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig> {
+interface NovaSpeechState {
+  isComplete: boolean;
+}
+
+export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig, NovaSpeechState> {
+  private logger: any;
+
   constructor() {
     super("AWSNovaSpeech");
-  }
-
-  protected async validateConfig(config: AWSNovaSpeechConfig): Promise<ValidationResult> {
-    // Simple validation - let service handle details
-    return { success: true };
+    this.logger = createLogger("NovaSpeechExecutor");
   }
 
   /**
-   * Execute the AWS Nova Speech node
+   * Initialize state
    */
-  protected async executeNode(
-    inputs: Record<string, any>,
-    config: AWSNovaSpeechConfig,
-    context: NodeExecutionContext
-  ): Promise<AWSNovaSpeechOutput> {
-    const nodeId = context.nodeId;
-    const startTime = Date.now();
+  initializeState(inputs: any): NovaSpeechState {
+    return {
+      isComplete: false,
+    };
+  }
 
-    this.logger.info(`🚀 [NovaSpeech] Starting execution for node: ${nodeId}`);
+  /**
+   * Handle events
+   */
+  async handleEvent(
+    event: { type: string; inputs?: any; config?: any },
+    state: NovaSpeechState,
+    emit: (output: any) => void,
+    context?: any // NodeExecutionContext from the framework
+  ): Promise<NovaSpeechState> {
+    // If already complete, return
+    if (state.isComplete) {
+      return state;
+    }
+
+    // Need context to proceed
+    if (!context) {
+      this.logger.error("No execution context provided");
+      return { ...state, isComplete: true };
+    }
+
+    const { inputs, config } = event;
+    const startTime = Date.now();
 
     try {
       this.logger.info("Executing AWS Nova Speech node", {
-        voice: config.voice,
-        temperature: config.temperature,
-        workflowId: context.workflow?.id,
+        workflowId: context.workflowId,
+        executionId: context.executionId
       });
-
-      // Get workflow metadata for publishing
-      const { chatId, conversationId, userId, providerId } = context.workflow!.variables!;
-
-      this.logger.info("Nova executor input analysis", {
-        hasInput: !!inputs.input,
-        inputMessage: inputs.input?.message?.substring(0, 50),
-        controlSignal: "START_CALL", // Always start call when node executes
-        chatId,
-      });
-
-      // Build metadata for the service
+      
+      // Get workflow variables from context
+      const { chatId, conversationId, userId, providerId } = context.workflow?.variables || {};
+      
+      // Build metadata for the service using context (like BedrockClaude)
       const metadata = {
-        workflowId: context.workflow!.id,
+        workflowId: context.workflowId || context.workflow?.id || "",
         executionId: context.executionId,
-        chatId,
-        conversationId,
-        userId,
+        nodeId: context.nodeId,
+        chatId: chatId || "",
+        conversationId: conversationId || "",
+        userId: userId || "",
         providerId: providerId || "AWS Nova Speech",
         workflowRunId: context.executionId,
       };
-
-      // Build credential context for service (service will fetch credentials internally)
-      const credentialContext = this.buildCredentialContext(context);
 
       // Use chatId as the sessionId for streaming
       const streamId = chatId;
@@ -73,7 +84,9 @@ export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig>
         temperature: config.temperature,
         temperatureType: typeof config.temperature,
         hasSystemPrompt: !!config.systemPrompt,
-        systemPromptPreview: config.systemPrompt ? config.systemPrompt.substring(0, 100) + "..." : "none",
+        systemPromptPreview: config.systemPrompt
+          ? config.systemPrompt.substring(0, 100) + "..."
+          : "none",
         hasConversationHistory: config.conversationHistory || [],
         historyCount: config.conversationHistory?.length || 0,
       });
@@ -85,19 +98,18 @@ export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig>
       // Call the service with all configuration including control signal
       const stats = await service.generateSpeechStream(
         {
-          systemPrompt: config.systemPrompt, // Pass system prompt as-is, don't default to empty string
-          // Audio input now comes via Redis streaming, not config
+          systemPrompt: config.systemPrompt,
           conversationHistory: config.conversationHistory,
           voice: config.voice as VoiceOption,
           redisChannel: config.redisChannel,
           maxTokens: config.maxTokens || 2000,
           temperature: config.temperature || 0.7,
           topP: config.topP || 0.3,
-          controlSignal: "START_CALL", // Always start call when node executes
-          // Tools should be passed through config if needed, not hardcoded here
+          controlSignal: "START_CALL",
         },
         metadata,
-        context
+        context, // Pass the context (same as PromiseNodes!)
+        emit // Pass the emit function so TextAccumulator can emit outputs!
       );
       const textOutput = stats.textOutput;
       const transcription = stats.transcription;
@@ -105,7 +117,7 @@ export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig>
 
       this.logger.info("Speech stream completed", {
         streamId,
-        workflowId: context.workflow?.id,
+        chatId: chatId || "",
         textOutput: textOutput ? `${textOutput.substring(0, 100)}...` : "No text output",
         audioOutput: stats.audioOutput ? "Audio generated" : "No audio output",
         totalTokens: stats.total_tokens,
@@ -122,8 +134,8 @@ export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig>
 
         try {
           await saveTokenUsage({
-            workflowId: context.workflow?.id || "",
-            executionId: context.executionId,
+            workflowId: metadata.workflowId,
+            executionId: metadata.executionId,
             nodeId: context.nodeId,
             nodeType: "AWSNovaSpeech",
             model: "amazon.nova-sonic-v1:0",
@@ -142,58 +154,33 @@ export default class NovaSpeechExecutor extends PromiseNode<AWSNovaSpeechConfig>
         }
       }
 
-      // Return with completion status following Bedrock pattern
-      const finalResult = {
+      // Emit the final output
+      emit({
         __outputs: {
-          streamId,
           text: textOutput || "",
-          conversation: {
-            user: transcription || "",
-            assistant: assistantResponse || "",
-          },
         },
+      });
+
+      this.logger.info(`🎯 [NovaSpeech] Completed execution, total time: ${Date.now() - startTime}ms`);
+
+      // Return state marking completion
+      return {
+        ...state,
+        isComplete: true,
       };
-
-      this.logger.info(
-        `🎯 [NovaSpeech] Returning result for node: ${nodeId}, total execution: ${Date.now() - startTime}ms`
-      );
-
-      return finalResult;
     } catch (error: any) {
       this.logger.error("Failed to generate speech", {
         error: error.message,
         code: error.name,
-        workflowId: context.workflow?.id,
+        workflowId: context?.workflowId
       });
 
-      // Return error output
+      // Return error state
       return {
-        __outputs: {
-          streamId: "",
-          text: "",
-          conversation: {
-            user: "",
-            assistant: "",
-          },
-        },
+        ...state,
+        isComplete: true,
       };
     }
-  }
-
-  /**
-   * Build credential context from execution context
-   */
-  private buildCredentialContext(context: NodeExecutionContext) {
-    const { workflowId, executionId, nodeId } = this.validateAndGetContext(context);
-
-    return {
-      workflowId,
-      executionId,
-      nodeId,
-      nodeType: this.nodeType,
-      config: context.config,
-      credentials: context.credentials || {},
-    };
   }
 }
 

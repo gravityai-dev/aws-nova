@@ -64,7 +64,8 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     config: NovaSpeechConfig,
     sessionId: string,
     promptId: string,
-    loggerName: string = "ResponseProcessor"
+    loggerName: string = "ResponseProcessor",
+    private emit?: (output: any) => void
   ) {
     this.logger = createLogger(loggerName);
 
@@ -75,7 +76,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     };
 
     // Initialize components
-    this.textAccumulator = new TextAccumulator(sessionId);
+    this.textAccumulator = new TextAccumulator(sessionId, "TextAccumulator", this.emit);
     this.usageStatsCollector = new UsageStatsCollector();
     this.eventParser = new EventParser(sessionId);
     this.audioHandler = new AudioHandler(this.context);
