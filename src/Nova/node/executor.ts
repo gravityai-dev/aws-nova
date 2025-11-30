@@ -139,9 +139,11 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
             nodeId: context.nodeId,
             nodeType: "AWSNovaSpeech",
             model: "amazon.nova-sonic-v1:0",
-            inputTokens: stats.inputTokens || 0,
-            outputTokens: stats.outputTokens || 0,
-            totalTokens: stats.total_tokens,
+            usage: {
+              inputTokens: stats.inputTokens || 0,
+              outputTokens: stats.outputTokens || 0,
+              total_tokens: stats.total_tokens,
+            },
             timestamp: new Date(),
           });
           this.logger.info(
