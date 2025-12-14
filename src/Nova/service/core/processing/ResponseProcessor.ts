@@ -221,6 +221,11 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     if (contentType === "AUDIO") {
       this.audioHandler.markAudioComplete();
       await this.audioHandler.handleAudioEnd();
+
+      // Emit conversation pair when turn ends (END_TURN means assistant finished speaking)
+      if (stopReason === "END_TURN") {
+        this.textAccumulator.emitConversation();
+      }
     }
   }
 

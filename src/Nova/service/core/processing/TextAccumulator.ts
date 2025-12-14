@@ -26,11 +26,7 @@ export class TextAccumulator {
   private readonly logger: any;
   private readonly sessionId: string;
 
-  constructor(
-    sessionId: string, 
-    loggerName: string = "TextAccumulator",
-    private emit?: (output: any) => void
-  ) {
+  constructor(sessionId: string, loggerName: string = "TextAccumulator", private emit?: (output: any) => void) {
     this.logger = createLogger(loggerName);
     this.sessionId = sessionId;
   }
@@ -48,15 +44,13 @@ export class TextAccumulator {
     // regardless of generationStage (SPECULATIVE or FINAL)
     if (role === "ASSISTANT") {
       this.isAssistantFinalResponse = true;
-      // Clear any previous assistant response to prevent mixing interrupted responses
-      this.assistantResponse = "";
-      // COMMENTED OUT: Not using textOutput accumulation anymore
-      // this.textOutput = this.transcription; // Keep transcription, reset assistant part
+      // DON'T clear assistantResponse - accumulate across multiple content chunks
+      // Nova sends multiple ASSISTANT content blocks for a single turn
     } else if (role === "USER") {
-      // Clear any previous transcription when starting new user input
+      // Clear previous transcription AND response when starting new user input
+      // This marks the start of a new conversation turn
       this.transcription = "";
-      // COMMENTED OUT: Not using textOutput accumulation anymore
-      // this.textOutput = "";
+      this.assistantResponse = "";
     }
   }
 
@@ -70,25 +64,10 @@ export class TextAccumulator {
     // Accumulate based on current context
     if (this.isAssistantFinalResponse) {
       this.assistantResponse += textOutput.content;
+      // Don't emit here - wait for emitConversation() to be called at END_TURN
     } else {
       // This is the audio transcription (ASR) - USER REQUEST
       this.transcription += textOutput.content;
-      
-      // Emit user request when captured
-      if (this.currentRole === 'USER' && this.transcription && this.emit) {
-        this.logger.info(`🎯 Emitting user request from TextAccumulator`, {
-          sessionId: this.sessionId,
-          userRequest: this.transcription,
-          length: this.transcription.length
-        });
-        
-        // Emit the user request as 'text' output
-        this.emit({
-          __outputs: {
-            text: this.transcription
-          }
-        });
-      }
     }
 
     // Also maintain full text output for backward compatibility
@@ -107,6 +86,28 @@ export class TextAccumulator {
     }`);
   }
 
+  /**
+   * Emit the complete conversation pair (query + response)
+   * Called at END_TURN when we have a complete turn
+   */
+  emitConversation(): void {
+    if (this.emit && this.transcription && this.assistantResponse) {
+      this.logger.info(`🎯 Emitting complete conversation pair`, {
+        sessionId: this.sessionId,
+        queryLength: this.transcription.length,
+        responseLength: this.assistantResponse.length,
+      });
+
+      this.emit({
+        __outputs: {
+          text: {
+            query: this.transcription,
+            response: this.assistantResponse,
+          },
+        },
+      });
+    }
+  }
 
   /**
    * Gets the current accumulation results
@@ -115,7 +116,7 @@ export class TextAccumulator {
     return {
       transcription: this.transcription,
       assistantResponse: this.assistantResponse,
-      fullTextOutput: this.textOutput
+      fullTextOutput: this.textOutput,
     };
   }
 
@@ -141,7 +142,6 @@ export class TextAccumulator {
     // Return computed combination instead of corrupted textOutput
     return this.transcription + this.assistantResponse;
   }
-
 
   /**
    * Resets all accumulated text

@@ -167,12 +167,8 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
         }
       }
 
-      // Emit the final output
-      emit({
-        __outputs: {
-          text: textOutput || "",
-        },
-      });
+      // TextAccumulator already emits text incrementally during streaming
+      // No need to emit again here
 
       this.logger.info(`🎯 [NovaSpeech] Completed execution, total time: ${Date.now() - startTime}ms`);
 

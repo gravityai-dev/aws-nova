@@ -11,7 +11,7 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
   const { NodeInputType, AI_RESULT_CHANNEL, SYSTEM_CHANNEL } = getPlatformDependencies();
 
   return {
-    packageVersion: "1.2.0",
+    packageVersion: "1.2.1",
     type: "AWSNovaSpeech",
     isService: false,
     name: "AWS Nova Speech",
@@ -29,8 +29,8 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
     outputs: [
       {
         name: "text",
-        type: NodeInputType.STRING,
-        description: "Combined text output (transcription + response)",
+        type: NodeInputType.OBJECT,
+        description: "Conversation object with query (user transcription) and response (assistant text)",
       },
       {
         name: "conversation",
