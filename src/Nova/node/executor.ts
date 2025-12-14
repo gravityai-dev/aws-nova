@@ -56,12 +56,23 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
     try {
       this.logger.info("Executing AWS Nova Speech node", {
         workflowId: context.workflowId,
-        executionId: context.executionId
+        executionId: context.executionId,
       });
-      
+
       // Get workflow variables from context
       const { chatId, conversationId, userId, providerId } = context.workflow?.variables || {};
-      
+
+      // Get action from input metadata (passed from client via START_CALL/END_CALL)
+      // Structure: inputs.input.[sourceNodeId].output.metadata.action
+      const inputObj = inputs?.input;
+      const firstKey = inputObj ? Object.keys(inputObj)[0] : null;
+      const sourceData = firstKey ? inputObj[firstKey] : null;
+      // The InputTrigger wraps data in "output"
+      const inputData = sourceData?.output || sourceData;
+      const action = inputData?.metadata?.action;
+
+      console.log("🎯 [NOVA EXECUTOR] Action:", action, "message:", inputData?.message);
+
       // Build metadata for the service using context (like BedrockClaude)
       const metadata = {
         workflowId: context.workflowId || context.workflow?.id || "",
@@ -84,9 +95,7 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
         temperature: config.temperature,
         temperatureType: typeof config.temperature,
         hasSystemPrompt: !!config.systemPrompt,
-        systemPromptPreview: config.systemPrompt
-          ? config.systemPrompt.substring(0, 100) + "..."
-          : "none",
+        systemPromptPreview: config.systemPrompt ? config.systemPrompt.substring(0, 100) + "..." : "none",
         hasConversationHistory: config.conversationHistory || [],
         historyCount: config.conversationHistory?.length || 0,
       });
@@ -100,16 +109,18 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
         {
           systemPrompt: config.systemPrompt,
           conversationHistory: config.conversationHistory,
+          initialRequest: config.initialRequest, // Text sent as USER message at call start
           voice: config.voice as VoiceOption,
           redisChannel: config.redisChannel,
           maxTokens: config.maxTokens || 2000,
           temperature: config.temperature || 0.7,
           topP: config.topP || 0.3,
-          controlSignal: "START_CALL",
+          controlSignal: action === "END_CALL" ? "END_CALL" : "START_CALL",
         },
         metadata,
         context, // Pass the context (same as PromiseNodes!)
         emit // Pass the emit function so TextAccumulator can emit outputs!
+        // Note: userQuery param omitted - Nova discovers ALL MCPs at session start
       );
       const textOutput = stats.textOutput;
       const transcription = stats.transcription;
@@ -138,11 +149,11 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
             executionId: metadata.executionId,
             nodeId: context.nodeId,
             nodeType: "AWSNovaSpeech",
-            model: "amazon.nova-sonic-v1:0",
+            model: "amazon.nova-2-sonic-v1:0",
             usage: {
-              inputTokens: stats.inputTokens || 0,
-              outputTokens: stats.outputTokens || 0,
               total_tokens: stats.total_tokens,
+              input_tokens: stats.inputTokens || 0,
+              output_tokens: stats.outputTokens || 0,
             },
             timestamp: new Date(),
           });
@@ -174,7 +185,7 @@ export default class NovaSpeechExecutor extends CallbackNode<AWSNovaSpeechConfig
       this.logger.error("Failed to generate speech", {
         error: error.message,
         code: error.name,
-        workflowId: context?.workflowId
+        workflowId: context?.workflowId,
       });
 
       // Return error state

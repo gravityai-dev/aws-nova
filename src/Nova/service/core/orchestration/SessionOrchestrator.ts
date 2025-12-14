@@ -42,69 +42,45 @@ export class SessionOrchestrator {
     emit?: (output: any) => void
   ): Promise<StreamUsageStats> {
     // Check for MCP services and get tools if available
-    let mcpTools = undefined;
-    let mcpSchema: any = undefined;
     const platformDeps = getPlatformDependencies();
-    
-    if (context) {
+
+    if (context && platformDeps.callService) {
       try {
-        this.logger.info("Platform dependencies available:", { 
-          hasCallService: !!platformDeps.callService,
-          availableFunctions: Object.keys(platformDeps).filter(k => typeof platformDeps[k] === 'function')
-        });
-        
-        this.logger.info("Context structure:", {
-          hasWorkflow: !!context.workflow,
-          workflowId: context.workflow?.id,
-          nodeId: context.nodeId,
-          executionId: context.executionId,
-          contextKeys: Object.keys(context)
-        });
-        
-        if (platformDeps.callService) {
-          mcpSchema = await platformDeps.callService("getSchema", {}, context);
-          
-          if (mcpSchema?.methods) {
-            this.logger.info(`MCP tools available: ${Object.keys(mcpSchema.methods).length} methods`);
-            
-            // Convert MCP schema to Nova tools format
-            mcpTools = Object.entries(mcpSchema.methods).map(([methodName, methodSchema]: [string, any]) => ({
-              toolSpec: {
-                name: methodName,
-                description: methodSchema.description || `Execute ${methodName} operation`,
-                inputSchema: {
-                  json: JSON.stringify(methodSchema.input || { type: "object", properties: {} })
-                },
+        const mcpSchema = await platformDeps.callService("getSchema", {}, context);
+
+        if (mcpSchema?.methods) {
+          this.logger.info(`MCP tools available: ${Object.keys(mcpSchema.methods).length} methods`);
+
+          // Convert MCP schema to Nova tools format
+          config.tools = Object.entries(mcpSchema.methods).map(([methodName, methodSchema]: [string, any]) => ({
+            toolSpec: {
+              name: methodName,
+              description: methodSchema.description || `Execute ${methodName} operation`,
+              inputSchema: {
+                json: JSON.stringify(methodSchema.input || { type: "object", properties: {} }),
               },
-            }));
+            },
+          }));
+
+          // Create service functions for each tool
+          config.mcpService = {};
+          for (const [methodName] of Object.entries(mcpSchema.methods)) {
+            config.mcpService[methodName] = async (input: any) => {
+              this.logger.info(`Calling MCP method: ${methodName}`, { input });
+              return platformDeps.callService(methodName, input, context);
+            };
           }
-        } else {
-          this.logger.warn("callService not available in platform dependencies");
         }
       } catch (error) {
         // No MCP service connected - continue without tools
         this.logger.debug("No MCP service connected", { error: (error as Error).message });
       }
     }
-    
-    // Add MCP tools to config if found
-    if (mcpTools && mcpSchema?.methods) {
-      config.tools = mcpTools;
-      
-      // Also create service functions for each tool
-      config.mcpService = {};
-      for (const [methodName, methodSchema] of Object.entries(mcpSchema.methods)) {
-        config.mcpService[methodName] = async (input: any) => {
-          this.logger.info(`Calling MCP method: ${methodName}`, { input });
-          return platformDeps.callService(methodName, input, context);
-        };
-      }
-    }
 
     // Fetch AWS credentials internally
     const { getNodeCredentials } = getPlatformDependencies();
     const credentials = await getNodeCredentials(context, "awsCredential");
-    
+
     if (!credentials?.accessKeyId || !credentials?.secretAccessKey) {
       throw new Error("AWS credentials not found");
     }
@@ -140,17 +116,19 @@ export class SessionOrchestrator {
 
     streamPromise.catch(async (error) => {
       this.logger.error("Stream error:", error);
-      
+
       // Use the AwsErrorHandler to log the error properly
       const { AwsErrorHandler } = await import("../../utils/errors/AwsErrorHandler");
-      await AwsErrorHandler.handleStreamError(error, { 
+      await AwsErrorHandler.handleStreamError(error, {
         sessionId,
         promptId: promptName,
-        responseProcessor: session.responseProcessor ? {
-          handleError: (err: any) => session.responseProcessor!.handleError(err)
-        } : undefined
+        responseProcessor: session.responseProcessor
+          ? {
+              handleError: (err: any) => session.responseProcessor!.handleError(err),
+            }
+          : undefined,
       });
-      
+
       // Don't close the event queue for ModelStreamErrorException
       if (error.name !== "ModelStreamErrorException") {
         session.eventQueue?.close();
@@ -162,22 +140,22 @@ export class SessionOrchestrator {
 
     await delay(800);
 
-    // Handle audio streaming with context for nodeId
-    await this.audioStreamManager.handleAudioStreaming(config, promptName, sessionId, metadata, session, context);
+    // Handle audio streaming with context for nodeId and emit for MCP results
+    await this.audioStreamManager.handleAudioStreaming(config, promptName, sessionId, metadata, session, context, emit);
 
     // Wait for completion
     try {
       await streamPromise;
     } catch (error: any) {
       this.logger.error("Stream processing failed", { error, sessionId });
-      
+
       // Handle specific AWS errors gracefully
       if (error.name === "ModelStreamErrorException") {
         this.logger.warn("Nova encountered a stream error - completing gracefully", {
           sessionId,
-          errorMessage: error.message
+          errorMessage: error.message,
         });
-        
+
         // Return partial results if available
         const partialResult = session.responseProcessor?.getUsageStats() || {
           estimated: true,
@@ -189,11 +167,11 @@ export class SessionOrchestrator {
           transcription: "",
           assistantResponse: "",
         };
-        
+
         sessionManager.endSession(sessionId);
         return partialResult;
       }
-      
+
       // Re-throw other errors
       throw error;
     }

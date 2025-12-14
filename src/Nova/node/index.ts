@@ -11,7 +11,7 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
   const { NodeInputType, AI_RESULT_CHANNEL, SYSTEM_CHANNEL } = getPlatformDependencies();
 
   return {
-    packageVersion: "1.1.31",
+    packageVersion: "1.2.0",
     type: "AWSNovaSpeech",
     isService: false,
     name: "AWS Nova Speech",
@@ -28,11 +28,6 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
     ],
     outputs: [
       {
-        name: "streamId",
-        type: NodeInputType.STRING,
-        description: "Stream ID for the voice response",
-      },
-      {
         name: "text",
         type: NodeInputType.STRING,
         description: "Combined text output (transcription + response)",
@@ -41,6 +36,11 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
         name: "conversation",
         type: NodeInputType.OBJECT,
         description: "Combined conversation object with user and assistant messages",
+      },
+      {
+        name: "mcpResult",
+        type: NodeInputType.OBJECT,
+        description: "MCP tool results",
       },
     ],
     configSchema: {
@@ -58,6 +58,14 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
           type: "object",
           title: "Conversation History",
           description: "JSON array of conversation history",
+          "ui:field": "template",
+        },
+        initialRequest: {
+          type: "string",
+          title: "Initial Request",
+          description:
+            "Text sent as USER message at call start - Nova responds immediately (e.g., 'hello' triggers greeting)",
+          default: "",
           "ui:field": "template",
         },
         voice: {
@@ -119,7 +127,7 @@ export function createNodeDefinition(): EnhancedNodeDefinition {
         },
       },
       required: ["voice", "redisChannel"],
-      "ui:order": ["systemPrompt", "conversationHistory", "voice", "temperature", "redisChannel"],
+      "ui:order": ["systemPrompt", "conversationHistory", "initialRequest", "voice", "temperature", "redisChannel"],
     },
     // Declare capabilities
     capabilities: {

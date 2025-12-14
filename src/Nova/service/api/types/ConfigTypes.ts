@@ -5,28 +5,28 @@
 /**
  * Available voice options for Nova Speech
  */
-export type VoiceOption = 
-  | 'tiffany' 
-  | 'matthew' 
-  | 'amy' 
-  | 'ambre' 
-  | 'florian' 
-  | 'beatrice' 
-  | 'lorenzo' 
-  | 'greta' 
-  | 'lennart' 
-  | 'lupe' 
-  | 'carlos';
+export type VoiceOption =
+  | "tiffany"
+  | "matthew"
+  | "amy"
+  | "ambre"
+  | "florian"
+  | "beatrice"
+  | "lorenzo"
+  | "greta"
+  | "lennart"
+  | "lupe"
+  | "carlos";
 
 /**
  * Audio format options
  */
-export type AudioFormat = 'lpcm' | 'mp3' | 'opus';
+export type AudioFormat = "lpcm" | "mp3" | "opus";
 
 /**
  * Control signals for session management
  */
-export type ControlSignal = 'START_CALL' | 'END_CALL' | 'PAUSE' | 'RESUME';
+export type ControlSignal = "START_CALL" | "END_CALL" | "PAUSE" | "RESUME";
 
 /**
  * Main configuration for Nova Speech
@@ -38,25 +38,29 @@ export interface NovaSpeechConfig {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
-  
+
   // Audio configuration
   audioInput?: string;
   audioFormat?: AudioFormat;
-  
+
   // Control
   controlSignal?: ControlSignal;
-  
+
   // Tool configuration
   tools?: any[];
   toolResponse?: any[];
   mcpService?: Record<string, (input: any) => Promise<any>>;
-  
+
   // Conversation context
   conversationHistory?: Array<{
-    role: 'user' | 'assistant';
+    role: "user" | "assistant";
     content: string;
   }>;
-  
+
+  // Initial request - text sent as USER message at call start
+  // Nova will respond immediately with audio (e.g., "hello" → greeting)
+  initialRequest?: string;
+
   // Redis configuration
   redisChannel?: string;
 }
@@ -71,13 +75,13 @@ export interface NovaSpeechResult {
   inputTokens: number;
   outputTokens: number;
   chunk_count: number;
-  
+
   // Output content
   textOutput: string;
   audioOutput?: string;
   transcription: string;
   assistantResponse: string;
-  
+
   // Session metadata
   sessionId?: string;
   duration?: number;

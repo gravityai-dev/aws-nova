@@ -2,8 +2,8 @@
  * Conversation history event builder for Nova Speech
  */
 
-import { v4 as uuid } from 'uuid';
-import { ContentStartEvent, TextInputEvent, ContentEndEvent } from './SystemPromptBuilder';
+import { v4 as uuid } from "uuid";
+import { ContentStartEvent, TextInputEvent, ContentEndEvent } from "./SystemPromptBuilder";
 
 export interface HistoryMessage {
   role: "USER" | "ASSISTANT";
@@ -22,11 +22,7 @@ export class HistoryEventBuilder {
   /**
    * Creates content start event for history message
    */
-  static createContentStart(
-    promptName: string,
-    contentName: string,
-    role: "USER" | "ASSISTANT"
-  ): ContentStartEvent {
+  static createContentStart(promptName: string, contentName: string, role: "USER" | "ASSISTANT"): ContentStartEvent {
     if (role !== "USER" && role !== "ASSISTANT") {
       throw new Error(`Invalid role: ${role}. Must be USER or ASSISTANT for history`);
     }
@@ -52,11 +48,7 @@ export class HistoryEventBuilder {
   /**
    * Creates text input event for history message
    */
-  static createTextInput(
-    promptName: string,
-    contentName: string,
-    content: string
-  ): TextInputEvent {
+  static createTextInput(promptName: string, contentName: string, content: string): TextInputEvent {
     const event: TextInputEvent = {
       event: {
         textInput: {
@@ -72,10 +64,7 @@ export class HistoryEventBuilder {
   /**
    * Creates content end event for history message
    */
-  static createContentEnd(
-    promptName: string,
-    contentName: string
-  ): ContentEndEvent {
+  static createContentEnd(promptName: string, contentName: string): ContentEndEvent {
     const event: ContentEndEvent = {
       event: {
         contentEnd: {
@@ -96,17 +85,19 @@ export class HistoryEventBuilder {
     role: "USER" | "ASSISTANT"
   ): Array<ContentStartEvent | TextInputEvent | ContentEndEvent> {
     const contentName = uuid();
-    
+
     // Truncate message content to avoid Nova limits
-    const truncatedMessage = message.length > MAX_MESSAGE_LENGTH 
-      ? message.substring(0, MAX_MESSAGE_LENGTH - 3) + "..."
-      : message;
+    const truncatedMessage =
+      message.length > MAX_MESSAGE_LENGTH ? message.substring(0, MAX_MESSAGE_LENGTH - 3) + "..." : message;
 
     const startEvent = this.createContentStart(promptName, contentName, role);
     const textInputEvent = this.createTextInput(promptName, contentName, truncatedMessage);
     const contentEndEvent = this.createContentEnd(promptName, contentName);
 
-    console.log(`🎯 HISTORY ${role} INPUT EVENT (${truncatedMessage.length} chars):`, JSON.stringify(textInputEvent, null, 2));
+    console.log(
+      `🎯 HISTORY ${role} INPUT EVENT (${truncatedMessage.length} chars):`,
+      JSON.stringify(textInputEvent, null, 2)
+    );
     console.log(`🎯 HISTORY ${role} END EVENT:`, JSON.stringify(contentEndEvent, null, 2));
 
     return [startEvent, textInputEvent, contentEndEvent];
@@ -155,17 +146,19 @@ export class HistoryEventBuilder {
     logger?: { warn: (message: string, data?: any) => void }
   ): Array<ContentStartEvent | TextInputEvent | ContentEndEvent> {
     console.log(`📚 Creating conversation history events for ${history.length} messages`);
-    
+
     // Truncate history before creating events
     const truncatedHistory = this.truncateHistory(history, logger);
-    
+
     const events: Array<ContentStartEvent | TextInputEvent | ContentEndEvent> = [];
 
     for (const message of truncatedHistory) {
       events.push(...this.createMessageEvents(promptName, message.content, message.role));
     }
 
-    console.log(`✅ Created ${events.length} history events from ${truncatedHistory.length} messages (original: ${history.length})`);
+    console.log(
+      `✅ Created ${events.length} history events from ${truncatedHistory.length} messages (original: ${history.length})`
+    );
     return events;
   }
 }

@@ -12,6 +12,7 @@ import {
   HistoryEventBuilder,
   AudioEventBuilder,
   EndEventBuilder,
+  TextBuilder,
 } from "../../io/events/incoming/builders";
 
 const { createLogger } = getPlatformDependencies();
@@ -52,6 +53,12 @@ export class EventInitializer {
     if (config.conversationHistory?.length) {
       await this.sendConversationHistory(config.conversationHistory, promptName, eventMetadata, eventQueue);
     }
+
+    // Send initial request as USER text message (triggers immediate response)
+    // DISABLED: Nova Speech requires audio input - text alone causes timeout
+    // if (config.initialRequest) {
+    //   await this.sendInitialRequest(config.initialRequest, promptName, eventMetadata, eventQueue);
+    // }
 
     // Send direct audio input if provided
     if (config.audioInput) {
@@ -96,6 +103,19 @@ export class EventInitializer {
     eventQueue: EventQueue
   ): Promise<void> {
     const events = HistoryEventBuilder.buildHistoryEvents(promptName, history);
+    const eventsWithMetadata = EventMetadataProcessor.addMetadataToEvents(events, eventMetadata);
+    eventsWithMetadata.forEach((event) => eventQueue.enqueue(event));
+  }
+
+  private async sendInitialRequest(
+    initialRequest: string,
+    promptName: string,
+    eventMetadata: EventMetadata,
+    eventQueue: EventQueue
+  ): Promise<void> {
+    this.logger.info("Sending initial request as USER text message", { initialRequest });
+    // Send as non-interactive TEXT input (interactive: false) per AWS docs
+    const events = TextBuilder.buildTextInputEvents(promptName, initialRequest);
     const eventsWithMetadata = EventMetadataProcessor.addMetadataToEvents(events, eventMetadata);
     eventsWithMetadata.forEach((event) => eventQueue.enqueue(event));
   }

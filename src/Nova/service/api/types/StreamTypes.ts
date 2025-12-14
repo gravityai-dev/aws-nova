@@ -5,25 +5,25 @@
 /**
  * Audio state types for tracking audio session status
  */
-export type AudioState = 
-  // Session states
-  | 'AUDIO_SESSION_STARTING'
-  | 'AUDIO_SESSION_READY'
-  | 'AUDIO_SESSION_ENDED'
-  | 'AUDIO_ERROR'
-  // Nova speech states
-  | 'NOVA_SPEECH_STARTED'
-  | 'NOVA_SPEECH_STREAMING'
-  | 'NOVA_SPEECH_ENDED'
+export type AudioState =
+  // Session states (generic)
+  | "SESSION_STARTING"
+  | "SESSION_READY"
+  | "SESSION_ENDED"
+  | "SESSION_ERROR"
+  // Assistant speech states (generic - works with any provider)
+  | "SPEECH_STARTED"
+  | "SPEECH_STREAMING"
+  | "SPEECH_ENDED"
   // User speech states
-  | 'USER_SPEECH_STARTED'
-  | 'USER_SPEECH_STREAMING'
-  | 'USER_SPEECH_ENDED'
+  | "USER_SPEECH_STARTED"
+  | "USER_SPEECH_STREAMING"
+  | "USER_SPEECH_ENDED"
   // Tool use states
-  | 'NOVA_TOOL_USE'
+  | "TOOL_USE"
   // Special states
-  | 'AUDIO_SIGNAL'
-  | 'SILENCE';
+  | "AUDIO_SIGNAL"
+  | "SILENCE";
 
 /**
  * Metadata for streaming sessions
@@ -59,7 +59,7 @@ export interface AudioChunk {
  */
 export interface StreamingSession {
   sessionId: string;
-  status: 'active' | 'paused' | 'ended' | 'error';
+  status: "active" | "paused" | "ended" | "error";
   startTime: Date;
   endTime?: Date;
   metadata: StreamingMetadata;

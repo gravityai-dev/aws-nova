@@ -12,11 +12,11 @@ const { createLogger, getAudioWebSocketManager } = getPlatformDependencies();
 const logger = createLogger("WebSocketAudioSubscriber");
 
 export interface WebSocketAudioSession {
-  sessionId: string;      // Nova session ID
-  chatId: string;         // Chat ID for this request
+  sessionId: string; // Nova session ID
+  chatId: string; // Chat ID for this request
   eventQueue: EventQueue; // Nova's event queue
   isActive: boolean;
-  contentName?: string;   // Current content name for audio stream
+  contentName?: string; // Current content name for audio stream
   contentStarted?: boolean; // Whether contentStart has been sent
   eventMetadata?: EventMetadata; // Event metadata for this session
 }
@@ -65,18 +65,14 @@ export class WebSocketAudioSubscriber {
    * @param eventMetadata - The event metadata for this session
    */
   registerSession(
-    wsSessionId: string, 
-    novaSessionId: string, 
-    chatId: string, 
+    wsSessionId: string,
+    novaSessionId: string,
+    chatId: string,
     eventQueue: EventQueue,
     eventMetadata?: EventMetadata
   ): void {
-    if (this.sessions.has(wsSessionId)) {
-      logger.warn("Session already registered, updating", { wsSessionId, novaSessionId, chatId });
-    }
-
     this.sessions.set(wsSessionId, {
-      sessionId: novaSessionId,  // Store Nova session ID
+      sessionId: novaSessionId, // Store Nova session ID
       chatId,
       eventQueue,
       isActive: true,
@@ -87,10 +83,16 @@ export class WebSocketAudioSubscriber {
       },
     });
 
-    logger.info("🎧 WebSocket audio session registered", { 
-      wsSessionId, 
-      novaSessionId, 
-      chatId 
+    // Mark audio session as active in the WebSocket manager
+    const audioWSManager = getAudioWebSocketManager?.();
+    if (audioWSManager?.startAudioSession) {
+      audioWSManager.startAudioSession(wsSessionId, novaSessionId);
+    }
+
+    logger.info("🎧 WebSocket audio session registered", {
+      wsSessionId,
+      novaSessionId,
+      chatId,
     });
   }
 

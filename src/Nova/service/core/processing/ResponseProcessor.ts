@@ -239,14 +239,14 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
     });
 
     // Publish tool use event through audio stream
-    const { metadata, sessionId } = this.context;
-    const publishSessionId = metadata.conversationId || sessionId;
-    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+    const { metadata } = this.context;
+    const conversationId = metadata.conversationId;
+    const publisher = AudioPublisherFactory.getPublisher(conversationId);
 
     await publisher
       .publishState({
-        state: "NOVA_TOOL_USE",
-        sessionId: publishSessionId,
+        state: "TOOL_USE",
+        conversationId,
         metadata,
         message: `Nova is using tool: ${toolName}`,
         additionalMetadata: {
@@ -256,7 +256,7 @@ export class NovaSpeechResponseProcessor implements StreamResponseProcessor {
         },
       })
       .catch((error: any) => {
-        this.logger.error("Failed to publish NOVA_TOOL_USE", { error: error.message });
+        this.logger.error("Failed to publish TOOL_USE", { error: error.message });
       });
 
     if (this.onToolUse) {

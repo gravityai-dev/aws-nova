@@ -45,26 +45,23 @@ export class AudioHandler {
    * Handle audio content start - send NOVA_SPEECH_STARTED
    */
   handleAudioStart(): void {
-    const { metadata, sessionId } = this.context;
+    const { metadata } = this.context;
+    const conversationId = metadata.conversationId;
 
-    console.log("🔊 Nova started speaking - publishing NOVA_SPEECH_STARTED state");
+    console.log("🔊 Assistant started speaking - publishing SPEECH_STARTED state");
     this.audioState.generationComplete = false;
 
-    // Use conversationId for WebSocket publishing (that's what the client connects with)
-    const publishSessionId = metadata.conversationId || sessionId;
-
-    // Get appropriate publisher for this session
-    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+    const publisher = AudioPublisherFactory.getPublisher(conversationId);
 
     publisher
       .publishState({
-        state: "NOVA_SPEECH_STARTED",
-        sessionId: publishSessionId,
+        state: "SPEECH_STARTED",
+        conversationId,
         metadata,
-        message: "Nova has started speaking - microphone should be muted",
+        message: "Assistant started speaking - microphone should be muted",
       })
       .catch((error: any) => {
-        logger.error("Failed to publish NOVA_SPEECH_STARTED", { error: error.message });
+        logger.error("Failed to publish SPEECH_STARTED", { error: error.message });
       });
   }
 
@@ -72,32 +69,27 @@ export class AudioHandler {
    * Handle audio chunk - just proxy it directly
    */
   async bufferAudioChunk(audioData: string): Promise<void> {
-    const { metadata, sessionId } = this.context;
+    const { metadata } = this.context;
+    const conversationId = metadata.conversationId;
 
-    // Use conversationId for WebSocket publishing
-    const publishSessionId = metadata.conversationId || sessionId;
-
-    // Get appropriate publisher for this session
-    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+    const publisher = AudioPublisherFactory.getPublisher(conversationId);
 
     try {
-      // Await the publish to provide backpressure to Nova
       await publisher.publishAudio({
         audioData: audioData,
         format: "lpcm",
         sourceType: "NovaSpeech",
         index: this.chunkIndex++,
-        sessionId: publishSessionId,
+        conversationId,
         metadata,
-        audioState: "NOVA_SPEECH_STREAMING" as AudioState,
+        audioState: "SPEECH_STREAMING" as AudioState,
       });
     } catch (error: any) {
       logger.error("Failed to publish audio", {
         error: error.message,
-        sessionId,
+        conversationId,
         index: this.chunkIndex - 1,
       });
-      // Don't throw - let Nova continue even if we can't publish
     }
   }
 
@@ -147,31 +139,27 @@ export class AudioHandler {
    * Handle audio content end - send final state
    */
   async handleAudioEnd(): Promise<void> {
-    const { metadata, sessionId } = this.context;
+    const { metadata } = this.context;
+    const conversationId = metadata.conversationId;
 
-    console.log("🔇 Nova finished speaking - publishing NOVA_SPEECH_ENDED state");
+    console.log("🔇 Assistant finished speaking - publishing SPEECH_ENDED state");
 
-    // Use conversationId for WebSocket publishing
-    const publishSessionId = metadata.conversationId || sessionId;
-
-    // Get appropriate publisher for this session
-    const publisher = AudioPublisherFactory.getPublisher(publishSessionId);
+    const publisher = AudioPublisherFactory.getPublisher(conversationId);
 
     try {
       await publisher.publishState({
-        state: "NOVA_SPEECH_ENDED",
-        sessionId: publishSessionId,
+        state: "SPEECH_ENDED",
+        conversationId,
         metadata,
-        message: "Nova has finished speaking - microphone can be unmuted",
+        message: "Assistant finished speaking - microphone can be unmuted",
       });
 
-      // Clean up any buffered audio in the publisher
       if (publisher.cleanup) {
-        await publisher.cleanup(publishSessionId);
-        logger.debug("Audio publisher cleanup completed", { sessionId: publishSessionId });
+        await publisher.cleanup(conversationId);
+        logger.debug("Audio publisher cleanup completed", { conversationId });
       }
     } catch (error: any) {
-      logger.error("Failed to publish NOVA_SPEECH_ENDED or cleanup", { error: error.message });
+      logger.error("Failed to publish SPEECH_ENDED or cleanup", { error: error.message });
     }
   }
 }

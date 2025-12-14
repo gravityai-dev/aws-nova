@@ -8,7 +8,12 @@ import { NovaSpeechSession } from "../streaming";
 // Import WebSocket publisher for state events
 import { WebSocketAudioPublisher } from "../../io/publishers/WebSocketAudioPublisher";
 import { EventMetadataProcessor, EventMetadata } from "../../io/events/metadata/EventMetadataProcessor";
-import { AudioEventBuilder, EndEventBuilder, ToolResponseBuilder } from "../../io/events/incoming/builders";
+import {
+  AudioEventBuilder,
+  EndEventBuilder,
+  ToolResponseBuilder,
+  TextBuilder,
+} from "../../io/events/incoming/builders";
 import { TIMING_DELAYS } from "../../utils/timing";
 import { WebSocketAudioSubscriber } from "../../io/websocket/WebSocketAudioSubscriber";
 
@@ -29,7 +34,8 @@ export class AudioStreamManager {
     sessionId: string,
     metadata: StreamingMetadata,
     session: NovaSpeechSession,
-    context?: any
+    context?: any,
+    emit?: (output: any) => void
   ): Promise<void> {
     // Check for controlSignal in config (it might be a custom property)
     const controlSignal = (config as any).controlSignal || "START_CALL";
@@ -45,14 +51,14 @@ export class AudioStreamManager {
     };
 
     // Setup tool response handler if needed
-    this.setupToolResponseHandler(config, eventMetadata, session);
+    this.setupToolResponseHandler(config, eventMetadata, session, emit);
 
     // Setup completion handler
     this.setupCompletionHandler(session, eventMetadata, promptName);
 
     // Handle control signals
     if (controlSignal === "START_CALL") {
-      await this.startAudioStreaming(metadata, session, promptName, eventMetadata, sessionId, context);
+      await this.startAudioStreaming(metadata, session, promptName, eventMetadata, sessionId, context, config);
     } else if (controlSignal === "END_CALL") {
       await this.endAudioStreaming(session, eventMetadata);
     }
@@ -64,13 +70,14 @@ export class AudioStreamManager {
     promptName: string,
     eventMetadata: EventMetadata,
     sessionId: string,
-    context?: any
+    context?: any,
+    config?: NovaSpeechConfig
   ): Promise<void> {
-    this.logger.info("📞 Starting call - subscribing to audio stream", { 
+    this.logger.info("📞 Starting call - subscribing to audio stream", {
       sessionId,
-      contextKeys: context ? Object.keys(context) : 'no context',
+      contextKeys: context ? Object.keys(context) : "no context",
       nodeId: context?.nodeId,
-      hasContext: !!context
+      hasContext: !!context,
     });
 
     // Using WebSocket audio only - Redis audio subscriber removed
@@ -81,25 +88,25 @@ export class AudioStreamManager {
       // Register with conversationId for stable WebSocket connection
       const wsSessionId = metadata.conversationId || sessionId;
       wsSubscriber.registerSession(
-        wsSessionId,                    // WebSocket session ID (conversationId)
-        sessionId,                      // Nova session ID
-        metadata.chatId || "",          // Chat ID
-        session.eventQueue!,            // Event queue
-        eventMetadata                   // Pass the same metadata used for Redis
+        wsSessionId, // WebSocket session ID (conversationId)
+        sessionId, // Nova session ID
+        metadata.chatId || "", // Chat ID
+        session.eventQueue!, // Event queue
+        eventMetadata // Pass the same metadata used for Redis
       );
-      this.logger.info("✅ WebSocket audio session registered", { 
-        wsSessionId, 
+      this.logger.info("✅ WebSocket audio session registered", {
+        wsSessionId,
         conversationId: metadata.conversationId,
-        novaSessionId: sessionId, 
-        chatId: metadata.chatId 
+        novaSessionId: sessionId,
+        chatId: metadata.chatId,
       });
     }
 
     // Publish session ready state via WebSocket
     const wsPublisher = new WebSocketAudioPublisher();
     await wsPublisher.publishState({
-      state: "AUDIO_SESSION_READY",
-      sessionId: metadata.conversationId || sessionId,
+      state: "SESSION_READY",
+      conversationId: metadata.conversationId,
       metadata,
       message: "Audio session is ready to receive input",
       additionalMetadata: {
@@ -107,9 +114,21 @@ export class AudioStreamManager {
         queueInfo: {
           queueSize: 0,
           maxQueueSize: 50,
-        }
-      }
+        },
+      },
     });
+
+    // Send initial request AFTER audio streaming is active
+    // This triggers Nova to respond immediately with a greeting
+    if (config?.initialRequest) {
+      this.logger.info("📝 Sending initial request after audio session ready", {
+        initialRequest: config.initialRequest,
+        sessionId,
+      });
+      const textEvents = TextBuilder.buildTextInputEvents(promptName, config.initialRequest);
+      const textEventsWithMetadata = EventMetadataProcessor.addMetadataToEvents(textEvents, eventMetadata);
+      textEventsWithMetadata.forEach((event) => session.eventQueue?.enqueue(event));
+    }
   }
 
   private async endAudioStreaming(session: NovaSpeechSession, eventMetadata: EventMetadata): Promise<void> {
@@ -134,7 +153,8 @@ export class AudioStreamManager {
   private setupToolResponseHandler(
     config: NovaSpeechConfig,
     eventMetadata: EventMetadata,
-    session: NovaSpeechSession
+    session: NovaSpeechSession,
+    emit?: (output: any) => void
   ): void {
     // Set up tool handler if we have tools or mcpService
     if (!config.tools && !config.mcpService) return;
@@ -151,11 +171,22 @@ export class AudioStreamManager {
 
         try {
           let toolResult: any;
-          
+
           // Check if we have an MCP service function for this tool
           if (config.mcpService && config.mcpService[toolUse.toolName]) {
             this.logger.info("Calling MCP service", { toolName: toolUse.toolName });
             toolResult = await config.mcpService[toolUse.toolName](toolUse.toolInput);
+
+            // Emit MCP result like OpenAI does
+            if (emit) {
+              const mcpResult = {
+                name: toolUse.toolName,
+                arguments: toolUse.toolInput,
+                result: toolResult,
+              };
+              emit({ __outputs: { mcpResult } });
+              this.logger.info(`📤 Emitted mcpResult via output connector: ${toolUse.toolName}`);
+            }
           } else if (config.toolResponse) {
             // Fallback to static tool response if provided
             toolResult = config.toolResponse;
@@ -178,7 +209,7 @@ export class AudioStreamManager {
           toolEventsWithMetadata.forEach((event: any) => session.eventQueue?.enqueue(event));
         } catch (error) {
           this.logger.error("Error executing tool", { error, toolName: toolUse.toolName });
-          
+
           // Send error response
           const errorResult = { error: `Tool execution failed: ${(error as Error).message}` };
           const toolResponseEvents = ToolResponseBuilder.buildToolResponseEvents(

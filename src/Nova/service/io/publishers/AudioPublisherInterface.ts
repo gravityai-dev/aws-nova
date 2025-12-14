@@ -9,7 +9,7 @@ export interface AudioPublishConfig {
   format: string;
   sourceType: string;
   index: number;
-  sessionId: string;
+  conversationId: string;
   metadata: StreamingMetadata;
   audioState: AudioState;
   additionalMetadata?: Record<string, any>;
@@ -17,7 +17,7 @@ export interface AudioPublishConfig {
 
 export interface StatePublishConfig {
   state: AudioState;
-  sessionId: string;
+  conversationId: string;
   metadata: StreamingMetadata;
   message?: string;
   additionalMetadata?: Record<string, any>;
@@ -28,19 +28,19 @@ export interface AudioPublisherInterface {
    * Publish audio data
    */
   publishAudio(config: AudioPublishConfig): Promise<void>;
-  
+
   /**
    * Publish state change (start/stop signals)
    */
   publishState(config: StatePublishConfig): Promise<void>;
-  
+
   /**
-   * Check if publisher is available for a session
+   * Check if publisher is available for a conversation
    */
-  isAvailable(sessionId: string): boolean;
-  
+  isAvailable(conversationId: string): boolean;
+
   /**
-   * Clean up any resources for a session
+   * Clean up any resources for a conversation
    */
-  cleanup?(sessionId: string): Promise<void>;
+  cleanup?(conversationId: string): Promise<void>;
 }
